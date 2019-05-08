@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,9 +12,10 @@
  */
 package io.reactivex.internal.operators.flowable;
 
+import org.reactivestreams.Subscriber;
+
 import io.reactivex.Flowable;
 import io.reactivex.internal.subscriptions.EmptySubscription;
-import org.reactivestreams.Subscriber;
 
 public final class FlowableNever extends Flowable<Object> {
     public static final Flowable<Object> INSTANCE = new FlowableNever();

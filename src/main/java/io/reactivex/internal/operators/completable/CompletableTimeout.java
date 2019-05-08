@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,6 +20,8 @@ import io.reactivex.*;
 import io.reactivex.disposables.*;
 import io.reactivex.plugins.RxJavaPlugins;
 
+import static io.reactivex.internal.util.ExceptionHelper.timeoutMessage;
+
 public final class CompletableTimeout extends Completable {
 
     final CompletableSource source;
@@ -38,48 +40,80 @@ public final class CompletableTimeout extends Completable {
     }
 
     @Override
-    public void subscribeActual(final CompletableObserver s) {
+    public void subscribeActual(final CompletableObserver observer) {
         final CompositeDisposable set = new CompositeDisposable();
-        s.onSubscribe(set);
+        observer.onSubscribe(set);
 
         final AtomicBoolean once = new AtomicBoolean();
 
-        Disposable timer = scheduler.scheduleDirect(new Runnable() {
-            @Override
-            public void run() {
-                if (once.compareAndSet(false, true)) {
-                    set.clear();
-                    if (other == null) {
-                        s.onError(new TimeoutException());
-                    } else {
-                        other.subscribe(new CompletableObserver() {
-
-                            @Override
-                            public void onSubscribe(Disposable d) {
-                                set.add(d);
-                            }
-
-                            @Override
-                            public void onError(Throwable e) {
-                                set.dispose();
-                                s.onError(e);
-                            }
-
-                            @Override
-                            public void onComplete() {
-                                set.dispose();
-                                s.onComplete();
-                            }
-
-                        });
-                    }
-                }
-            }
-        }, timeout, unit);
+        Disposable timer = scheduler.scheduleDirect(new DisposeTask(once, set, observer), timeout, unit);
 
         set.add(timer);
 
-        source.subscribe(new CompletableObserver() {
+        source.subscribe(new TimeOutObserver(set, once, observer));
+    }
+
+    static final class TimeOutObserver implements CompletableObserver {
+
+        private final CompositeDisposable set;
+        private final AtomicBoolean once;
+        private final CompletableObserver downstream;
+
+        TimeOutObserver(CompositeDisposable set, AtomicBoolean once, CompletableObserver observer) {
+            this.set = set;
+            this.once = once;
+            this.downstream = observer;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            set.add(d);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            if (once.compareAndSet(false, true)) {
+                set.dispose();
+                downstream.onError(e);
+            } else {
+                RxJavaPlugins.onError(e);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (once.compareAndSet(false, true)) {
+                set.dispose();
+                downstream.onComplete();
+            }
+        }
+
+    }
+
+    final class DisposeTask implements Runnable {
+        private final AtomicBoolean once;
+        final CompositeDisposable set;
+        final CompletableObserver downstream;
+
+        DisposeTask(AtomicBoolean once, CompositeDisposable set, CompletableObserver observer) {
+            this.once = once;
+            this.set = set;
+            this.downstream = observer;
+        }
+
+        @Override
+        public void run() {
+            if (once.compareAndSet(false, true)) {
+                set.clear();
+                if (other == null) {
+                    downstream.onError(new TimeoutException(timeoutMessage(timeout, unit)));
+                } else {
+                    other.subscribe(new DisposeObserver());
+                }
+            }
+        }
+
+        final class DisposeObserver implements CompletableObserver {
 
             @Override
             public void onSubscribe(Disposable d) {
@@ -88,22 +122,16 @@ public final class CompletableTimeout extends Completable {
 
             @Override
             public void onError(Throwable e) {
-                if (once.compareAndSet(false, true)) {
-                    set.dispose();
-                    s.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
+                set.dispose();
+                downstream.onError(e);
             }
 
             @Override
             public void onComplete() {
-                if (once.compareAndSet(false, true)) {
-                    set.dispose();
-                    s.onComplete();
-                }
+                set.dispose();
+                downstream.onComplete();
             }
 
-        });
+        }
     }
 }

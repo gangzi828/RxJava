@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Method;
@@ -26,12 +27,12 @@ import org.mockito.InOrder;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.Flowable;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
-import io.reactivex.functions.Function;
+import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.*;
 import io.reactivex.schedulers.*;
 import io.reactivex.subscribers.*;
@@ -40,7 +41,7 @@ public class FlowableConcatTest {
 
     @Test
     public void testConcat() {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         final String[] o = { "1", "3", "5", "7" };
         final String[] e = { "2", "4", "6" };
@@ -49,14 +50,14 @@ public class FlowableConcatTest {
         final Flowable<String> even = Flowable.fromArray(e);
 
         Flowable<String> concat = Flowable.concat(odds, even);
-        concat.subscribe(observer);
+        concat.subscribe(subscriber);
 
-        verify(observer, times(7)).onNext(anyString());
+        verify(subscriber, times(7)).onNext(anyString());
     }
 
     @Test
     public void testConcatWithList() {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         final String[] o = { "1", "3", "5", "7" };
         final String[] e = { "2", "4", "6" };
@@ -67,14 +68,14 @@ public class FlowableConcatTest {
         list.add(odds);
         list.add(even);
         Flowable<String> concat = Flowable.concat(Flowable.fromIterable(list));
-        concat.subscribe(observer);
+        concat.subscribe(subscriber);
 
-        verify(observer, times(7)).onNext(anyString());
+        verify(subscriber, times(7)).onNext(anyString());
     }
 
     @Test
     public void testConcatObservableOfObservables() {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         final String[] o = { "1", "3", "5", "7" };
         final String[] e = { "2", "4", "6" };
@@ -82,23 +83,23 @@ public class FlowableConcatTest {
         final Flowable<String> odds = Flowable.fromArray(o);
         final Flowable<String> even = Flowable.fromArray(e);
 
-        Flowable<Flowable<String>> observableOfObservables = Flowable.unsafeCreate(new Publisher<Flowable<String>>() {
+        Flowable<Flowable<String>> flowableOfFlowables = Flowable.unsafeCreate(new Publisher<Flowable<String>>() {
 
             @Override
-            public void subscribe(Subscriber<? super Flowable<String>> observer) {
-                observer.onSubscribe(new BooleanSubscription());
+            public void subscribe(Subscriber<? super Flowable<String>> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
                 // simulate what would happen in an observable
-                observer.onNext(odds);
-                observer.onNext(even);
-                observer.onComplete();
+                subscriber.onNext(odds);
+                subscriber.onNext(even);
+                subscriber.onComplete();
             }
 
         });
-        Flowable<String> concat = Flowable.concat(observableOfObservables);
+        Flowable<String> concat = Flowable.concat(flowableOfFlowables);
 
-        concat.subscribe(observer);
+        concat.subscribe(subscriber);
 
-        verify(observer, times(7)).onNext(anyString());
+        verify(subscriber, times(7)).onNext(anyString());
     }
 
     /**
@@ -106,12 +107,12 @@ public class FlowableConcatTest {
      */
     @Test
     public void testSimpleAsyncConcat() {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         TestObservable<String> o1 = new TestObservable<String>("one", "two", "three");
         TestObservable<String> o2 = new TestObservable<String>("four", "five", "six");
 
-        Flowable.concat(Flowable.unsafeCreate(o1), Flowable.unsafeCreate(o2)).subscribe(observer);
+        Flowable.concat(Flowable.unsafeCreate(o1), Flowable.unsafeCreate(o2)).subscribe(subscriber);
 
         try {
             // wait for async observables to complete
@@ -121,13 +122,13 @@ public class FlowableConcatTest {
             throw new RuntimeException("failed waiting on threads");
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(1)).onNext("four");
-        inOrder.verify(observer, times(1)).onNext("five");
-        inOrder.verify(observer, times(1)).onNext("six");
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(1)).onNext("four");
+        inOrder.verify(subscriber, times(1)).onNext("five");
+        inOrder.verify(subscriber, times(1)).onNext("six");
     }
 
     @Test
@@ -146,7 +147,7 @@ public class FlowableConcatTest {
      */
     @Test
     public void testNestedAsyncConcat() throws InterruptedException {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         final TestObservable<String> o1 = new TestObservable<String>("one", "two", "three");
         final TestObservable<String> o2 = new TestObservable<String>("four", "five", "six");
@@ -157,17 +158,17 @@ public class FlowableConcatTest {
         final CountDownLatch parentHasStarted = new CountDownLatch(1);
         final CountDownLatch parentHasFinished = new CountDownLatch(1);
 
-
         Flowable<Flowable<String>> observableOfObservables = Flowable.unsafeCreate(new Publisher<Flowable<String>>() {
 
             @Override
-            public void subscribe(final Subscriber<? super Flowable<String>> observer) {
+            public void subscribe(final Subscriber<? super Flowable<String>> subscriber) {
                 final Disposable d = Disposables.empty();
-                observer.onSubscribe(new Subscription() {
+                subscriber.onSubscribe(new Subscription() {
                     @Override
                     public void request(long n) {
 
                     }
+
                     @Override
                     public void cancel() {
                         d.dispose();
@@ -181,30 +182,30 @@ public class FlowableConcatTest {
                             // emit first
                             if (!d.isDisposed()) {
                                 System.out.println("Emit o1");
-                                observer.onNext(Flowable.unsafeCreate(o1));
+                                subscriber.onNext(Flowable.unsafeCreate(o1));
                             }
                             // emit second
                             if (!d.isDisposed()) {
                                 System.out.println("Emit o2");
-                                observer.onNext(Flowable.unsafeCreate(o2));
+                                subscriber.onNext(Flowable.unsafeCreate(o2));
                             }
 
                             // wait until sometime later and emit third
                             try {
                                 allowThird.await();
                             } catch (InterruptedException e) {
-                                observer.onError(e);
+                                subscriber.onError(e);
                             }
                             if (!d.isDisposed()) {
                                 System.out.println("Emit o3");
-                                observer.onNext(Flowable.unsafeCreate(o3));
+                                subscriber.onNext(Flowable.unsafeCreate(o3));
                             }
 
                         } catch (Throwable e) {
-                            observer.onError(e);
+                            subscriber.onError(e);
                         } finally {
                             System.out.println("Done parent Flowable");
-                            observer.onComplete();
+                            subscriber.onComplete();
                             parentHasFinished.countDown();
                         }
                     }
@@ -214,7 +215,7 @@ public class FlowableConcatTest {
             }
         });
 
-        Flowable.concat(observableOfObservables).subscribe(observer);
+        Flowable.concat(observableOfObservables).subscribe(subscriber);
 
         // wait for parent to start
         parentHasStarted.await();
@@ -229,20 +230,20 @@ public class FlowableConcatTest {
             throw new RuntimeException("failed waiting on threads", e);
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(1)).onNext("four");
-        inOrder.verify(observer, times(1)).onNext("five");
-        inOrder.verify(observer, times(1)).onNext("six");
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(1)).onNext("four");
+        inOrder.verify(subscriber, times(1)).onNext("five");
+        inOrder.verify(subscriber, times(1)).onNext("six");
         // we shouldn't have the following 3 yet
-        inOrder.verify(observer, never()).onNext("seven");
-        inOrder.verify(observer, never()).onNext("eight");
-        inOrder.verify(observer, never()).onNext("nine");
+        inOrder.verify(subscriber, never()).onNext("seven");
+        inOrder.verify(subscriber, never()).onNext("eight");
+        inOrder.verify(subscriber, never()).onNext("nine");
         // we should not be completed yet
-        verify(observer, never()).onComplete();
-        verify(observer, never()).onError(any(Throwable.class));
+        verify(subscriber, never()).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
 
         // now allow the third
         allowThird.countDown();
@@ -263,17 +264,17 @@ public class FlowableConcatTest {
             throw new RuntimeException("failed waiting on threads", e);
         }
 
-        inOrder.verify(observer, times(1)).onNext("seven");
-        inOrder.verify(observer, times(1)).onNext("eight");
-        inOrder.verify(observer, times(1)).onNext("nine");
+        inOrder.verify(subscriber, times(1)).onNext("seven");
+        inOrder.verify(subscriber, times(1)).onNext("eight");
+        inOrder.verify(subscriber, times(1)).onNext("nine");
 
-        verify(observer, never()).onError(any(Throwable.class));
-        inOrder.verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
+        inOrder.verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testBlockedObservableOfObservables() {
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         final String[] o = { "1", "3", "5", "7" };
         final String[] e = { "2", "4", "6" };
@@ -284,7 +285,7 @@ public class FlowableConcatTest {
         @SuppressWarnings("unchecked")
         TestObservable<Flowable<String>> observableOfObservables = new TestObservable<Flowable<String>>(callOnce, okToContinue, odds, even);
         Flowable<String> concatF = Flowable.concat(Flowable.unsafeCreate(observableOfObservables));
-        concatF.subscribe(observer);
+        concatF.subscribe(subscriber);
         try {
             //Block main thread to allow observables to serve up o1.
             callOnce.await();
@@ -293,10 +294,10 @@ public class FlowableConcatTest {
             fail(ex.getMessage());
         }
         // The concated observable should have served up all of the odds.
-        verify(observer, times(1)).onNext("1");
-        verify(observer, times(1)).onNext("3");
-        verify(observer, times(1)).onNext("5");
-        verify(observer, times(1)).onNext("7");
+        verify(subscriber, times(1)).onNext("1");
+        verify(subscriber, times(1)).onNext("3");
+        verify(subscriber, times(1)).onNext("5");
+        verify(subscriber, times(1)).onNext("7");
 
         try {
             // unblock observables so it can serve up o2 and complete
@@ -307,9 +308,9 @@ public class FlowableConcatTest {
             fail(ex.getMessage());
         }
         // The concatenated observable should now have served up all the evens.
-        verify(observer, times(1)).onNext("2");
-        verify(observer, times(1)).onNext("4");
-        verify(observer, times(1)).onNext("6");
+        verify(subscriber, times(1)).onNext("2");
+        verify(subscriber, times(1)).onNext("4");
+        verify(subscriber, times(1)).onNext("6");
     }
 
     @Test
@@ -318,13 +319,13 @@ public class FlowableConcatTest {
         //This observable will send "hello" MAX_VALUE time.
         final TestObservable<String> w2 = new TestObservable<String>("hello", Integer.MAX_VALUE);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         @SuppressWarnings("unchecked")
         TestObservable<Flowable<String>> observableOfObservables = new TestObservable<Flowable<String>>(Flowable.unsafeCreate(w1), Flowable.unsafeCreate(w2));
         Flowable<String> concatF = Flowable.concat(Flowable.unsafeCreate(observableOfObservables));
 
-        concatF.take(50).subscribe(observer);
+        concatF.take(50).subscribe(subscriber);
 
         //Wait for the thread to start up.
         try {
@@ -334,13 +335,13 @@ public class FlowableConcatTest {
             e.printStackTrace();
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(47)).onNext("hello");
-        verify(observer, times(1)).onComplete();
-        verify(observer, never()).onError(any(Throwable.class));
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(47)).onNext("hello");
+        verify(subscriber, times(1)).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test
@@ -352,24 +353,24 @@ public class FlowableConcatTest {
         final TestObservable<String> w1 = new TestObservable<String>(null, okToContinueW1, "one", "two", "three");
         final TestObservable<String> w2 = new TestObservable<String>(null, okToContinueW2, "four", "five", "six");
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         Flowable<Flowable<String>> observableOfObservables = Flowable.unsafeCreate(new Publisher<Flowable<String>>() {
 
             @Override
-            public void subscribe(Subscriber<? super Flowable<String>> observer) {
-                observer.onSubscribe(new BooleanSubscription());
+            public void subscribe(Subscriber<? super Flowable<String>> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
                 // simulate what would happen in an observable
-                observer.onNext(Flowable.unsafeCreate(w1));
-                observer.onNext(Flowable.unsafeCreate(w2));
-                observer.onComplete();
+                subscriber.onNext(Flowable.unsafeCreate(w1));
+                subscriber.onNext(Flowable.unsafeCreate(w2));
+                subscriber.onComplete();
             }
 
         });
         Flowable<String> concat = Flowable.concat(observableOfObservables);
-        concat.subscribe(observer);
+        concat.subscribe(subscriber);
 
-        verify(observer, times(0)).onComplete();
+        verify(subscriber, times(0)).onComplete();
 
         try {
             // release both threads
@@ -382,14 +383,14 @@ public class FlowableConcatTest {
             e.printStackTrace();
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(1)).onNext("four");
-        inOrder.verify(observer, times(1)).onNext("five");
-        inOrder.verify(observer, times(1)).onNext("six");
-        verify(observer, times(1)).onComplete();
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(1)).onNext("four");
+        inOrder.verify(subscriber, times(1)).onNext("five");
+        inOrder.verify(subscriber, times(1)).onNext("six");
+        verify(subscriber, times(1)).onComplete();
 
     }
 
@@ -403,8 +404,8 @@ public class FlowableConcatTest {
         final TestObservable<String> w1 = new TestObservable<String>("one", "two", "three");
         final TestObservable<String> w2 = new TestObservable<String>(callOnce, okToContinue, "four", "five", "six");
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        TestSubscriber<String> ts = new TestSubscriber<String>(observer, 0L);
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        TestSubscriber<String> ts = new TestSubscriber<String>(subscriber, 0L);
 
         final Flowable<String> concat = Flowable.concat(Flowable.unsafeCreate(w1), Flowable.unsafeCreate(w2));
 
@@ -424,14 +425,14 @@ public class FlowableConcatTest {
             fail(e.getMessage());
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(1)).onNext("four");
-        inOrder.verify(observer, never()).onNext("five");
-        inOrder.verify(observer, never()).onNext("six");
-        inOrder.verify(observer, never()).onComplete();
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(1)).onNext("four");
+        inOrder.verify(subscriber, never()).onNext("five");
+        inOrder.verify(subscriber, never()).onNext("six");
+        inOrder.verify(subscriber, never()).onComplete();
 
     }
 
@@ -445,8 +446,8 @@ public class FlowableConcatTest {
         final TestObservable<String> w1 = new TestObservable<String>("one", "two", "three");
         final TestObservable<String> w2 = new TestObservable<String>(callOnce, okToContinue, "four", "five", "six");
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        TestSubscriber<String> ts = new TestSubscriber<String>(observer, 0L);
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        TestSubscriber<String> ts = new TestSubscriber<String>(subscriber, 0L);
 
         @SuppressWarnings("unchecked")
         TestObservable<Flowable<String>> observableOfObservables = new TestObservable<Flowable<String>>(Flowable.unsafeCreate(w1), Flowable.unsafeCreate(w2));
@@ -469,15 +470,15 @@ public class FlowableConcatTest {
             fail(e.getMessage());
         }
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("one");
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        inOrder.verify(observer, times(1)).onNext("four");
-        inOrder.verify(observer, never()).onNext("five");
-        inOrder.verify(observer, never()).onNext("six");
-        verify(observer, never()).onComplete();
-        verify(observer, never()).onError(any(Throwable.class));
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("one");
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        inOrder.verify(subscriber, times(1)).onNext("four");
+        inOrder.verify(subscriber, never()).onNext("five");
+        inOrder.verify(subscriber, never()).onNext("six");
+        verify(subscriber, never()).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     private static class TestObservable<T> implements Publisher<T> {
@@ -525,8 +526,8 @@ public class FlowableConcatTest {
         }
 
         @Override
-        public void subscribe(final Subscriber<? super T> observer) {
-            observer.onSubscribe(s);
+        public void subscribe(final Subscriber<? super T> subscriber) {
+            subscriber.onSubscribe(s);
             t = new Thread(new Runnable() {
 
                 @Override
@@ -534,9 +535,9 @@ public class FlowableConcatTest {
                     try {
                         while (count < size && subscribed) {
                             if (null != values) {
-                                observer.onNext(values.get(count));
+                                subscriber.onNext(values.get(count));
                             } else {
-                                observer.onNext(seed);
+                                subscriber.onNext(seed);
                             }
                             count++;
                             //Unblock the main thread to call unsubscribe.
@@ -549,7 +550,7 @@ public class FlowableConcatTest {
                             }
                         }
                         if (subscribed) {
-                            observer.onComplete();
+                            subscriber.onComplete();
                         }
                     } catch (InterruptedException e) {
                         e.printStackTrace();
@@ -570,45 +571,45 @@ public class FlowableConcatTest {
 
     @Test
     public void testMultipleObservers() {
-        Subscriber<Object> o1 = TestHelper.mockSubscriber();
-        Subscriber<Object> o2 = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber2 = TestHelper.mockSubscriber();
 
         TestScheduler s = new TestScheduler();
 
         Flowable<Long> timer = Flowable.interval(500, TimeUnit.MILLISECONDS, s).take(2);
-        Flowable<Long> o = Flowable.concat(timer, timer);
+        Flowable<Long> f = Flowable.concat(timer, timer);
 
-        o.subscribe(o1);
-        o.subscribe(o2);
+        f.subscribe(subscriber1);
+        f.subscribe(subscriber2);
 
-        InOrder inOrder1 = inOrder(o1);
-        InOrder inOrder2 = inOrder(o2);
-
-        s.advanceTimeBy(500, TimeUnit.MILLISECONDS);
-
-        inOrder1.verify(o1, times(1)).onNext(0L);
-        inOrder2.verify(o2, times(1)).onNext(0L);
+        InOrder inOrder1 = inOrder(subscriber1);
+        InOrder inOrder2 = inOrder(subscriber2);
 
         s.advanceTimeBy(500, TimeUnit.MILLISECONDS);
 
-        inOrder1.verify(o1, times(1)).onNext(1L);
-        inOrder2.verify(o2, times(1)).onNext(1L);
+        inOrder1.verify(subscriber1, times(1)).onNext(0L);
+        inOrder2.verify(subscriber2, times(1)).onNext(0L);
 
         s.advanceTimeBy(500, TimeUnit.MILLISECONDS);
 
-        inOrder1.verify(o1, times(1)).onNext(0L);
-        inOrder2.verify(o2, times(1)).onNext(0L);
+        inOrder1.verify(subscriber1, times(1)).onNext(1L);
+        inOrder2.verify(subscriber2, times(1)).onNext(1L);
 
         s.advanceTimeBy(500, TimeUnit.MILLISECONDS);
 
-        inOrder1.verify(o1, times(1)).onNext(1L);
-        inOrder2.verify(o2, times(1)).onNext(1L);
+        inOrder1.verify(subscriber1, times(1)).onNext(0L);
+        inOrder2.verify(subscriber2, times(1)).onNext(0L);
 
-        inOrder1.verify(o1, times(1)).onComplete();
-        inOrder2.verify(o2, times(1)).onComplete();
+        s.advanceTimeBy(500, TimeUnit.MILLISECONDS);
 
-        verify(o1, never()).onError(any(Throwable.class));
-        verify(o2, never()).onError(any(Throwable.class));
+        inOrder1.verify(subscriber1, times(1)).onNext(1L);
+        inOrder2.verify(subscriber2, times(1)).onNext(1L);
+
+        inOrder1.verify(subscriber1, times(1)).onComplete();
+        inOrder2.verify(subscriber2, times(1)).onComplete();
+
+        verify(subscriber1, never()).onError(any(Throwable.class));
+        verify(subscriber2, never()).onError(any(Throwable.class));
     }
 
     @Test
@@ -635,6 +636,7 @@ public class FlowableConcatTest {
         inOrder.verify(o).onSuccess(list);
         verify(o, never()).onError(any(Throwable.class));
     }
+
     @Test
     public void concatVeryLongObservableOfObservablesTakeHalf() {
         final int n = 10000;
@@ -704,7 +706,7 @@ public class FlowableConcatTest {
     // https://github.com/ReactiveX/RxJava/issues/1818
     @Test
     public void testConcatWithNonCompliantSourceDoubleOnComplete() {
-        Flowable<String> o = Flowable.unsafeCreate(new Publisher<String>() {
+        Flowable<String> f = Flowable.unsafeCreate(new Publisher<String>() {
 
             @Override
             public void subscribe(Subscriber<? super String> s) {
@@ -717,7 +719,7 @@ public class FlowableConcatTest {
         });
 
         TestSubscriber<String> ts = new TestSubscriber<String>();
-        Flowable.concat(o, o).subscribe(ts);
+        Flowable.concat(f, f).subscribe(ts);
         ts.awaitTerminalEvent(500, TimeUnit.MILLISECONDS);
         ts.assertTerminated();
         ts.assertNoErrors();
@@ -732,12 +734,12 @@ public class FlowableConcatTest {
         Function<Integer, Flowable<Integer>> func = new Function<Integer, Flowable<Integer>>() {
             @Override
             public Flowable<Integer> apply(Integer t) {
-                Flowable<Integer> observable = Flowable.just(t)
+                Flowable<Integer> flowable = Flowable.just(t)
                         .subscribeOn(sch)
                 ;
-                FlowableProcessor<Integer> subject = UnicastProcessor.create();
-                observable.subscribe(subject);
-                return subject;
+                FlowableProcessor<Integer> processor = UnicastProcessor.create();
+                flowable.subscribe(processor);
+                return processor;
             }
         };
 
@@ -777,10 +779,10 @@ public class FlowableConcatTest {
 
     @Test
     public void testRequestOverflowDoesNotStallStream() {
-        Flowable<Integer> o1 = Flowable.just(1,2,3);
-        Flowable<Integer> o2 = Flowable.just(4,5,6);
+        Flowable<Integer> f1 = Flowable.just(1, 2, 3);
+        Flowable<Integer> f2 = Flowable.just(4, 5, 6);
         final AtomicBoolean completed = new AtomicBoolean(false);
-        o1.concatWith(o2).subscribe(new DefaultSubscriber<Integer>() {
+        f1.concatWith(f2).subscribe(new DefaultSubscriber<Integer>() {
 
             @Override
             public void onComplete() {
@@ -1230,7 +1232,7 @@ public class FlowableConcatTest {
 
     @Test
     public void concatMapJustSource() {
-        Flowable.just(0)
+        Flowable.just(0).hide()
         .concatMap(new Function<Object, Flowable<Integer>>() {
             @Override
             public Flowable<Integer> apply(Object v) throws Exception {
@@ -1239,7 +1241,428 @@ public class FlowableConcatTest {
         }, 16)
         .test()
         .assertResult(1);
-
     }
 
+    @Test
+    public void concatMapJustSourceDelayError() {
+        Flowable.just(0).hide()
+        .concatMapDelayError(new Function<Object, Flowable<Integer>>() {
+            @Override
+            public Flowable<Integer> apply(Object v) throws Exception {
+                return Flowable.just(1);
+            }
+        }, 16, false)
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void concatMapScalarBackpressured() {
+        Flowable.just(1).hide()
+        .concatMap(Functions.justFunction(Flowable.just(2)))
+        .test(1L)
+        .assertResult(2);
+    }
+
+    @Test
+    public void concatMapScalarBackpressuredDelayError() {
+        Flowable.just(1).hide()
+        .concatMapDelayError(Functions.justFunction(Flowable.just(2)))
+        .test(1L)
+        .assertResult(2);
+    }
+
+    @Test
+    public void concatMapEmpty() {
+        Flowable.just(1).hide()
+        .concatMap(Functions.justFunction(Flowable.empty()))
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void concatMapEmptyDelayError() {
+        Flowable.just(1).hide()
+        .concatMapDelayError(Functions.justFunction(Flowable.empty()))
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void ignoreBackpressure() {
+        new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> s) {
+                s.onSubscribe(new BooleanSubscription());
+                for (int i = 0; i < 10; i++) {
+                    s.onNext(i);
+                }
+            }
+        }
+        .concatMap(Functions.justFunction(Flowable.just(2)), 8)
+        .test(0L)
+        .assertFailure(IllegalStateException.class);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Publisher<Integer>>() {
+            @Override
+            public Publisher<Integer> apply(Flowable<Object> f) throws Exception {
+                return f.concatMap(Functions.justFunction(Flowable.just(2)));
+            }
+        });
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Publisher<Integer>>() {
+            @Override
+            public Publisher<Integer> apply(Flowable<Object> f) throws Exception {
+                return f.concatMapDelayError(Functions.justFunction(Flowable.just(2)));
+            }
+        });
+    }
+
+    @Test
+    public void immediateInnerNextOuterError() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        final TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    pp.onError(new TestException("First"));
+                }
+            }
+        };
+
+        pp.concatMap(Functions.justFunction(Flowable.just(1)))
+        .subscribe(ts);
+
+        pp.onNext(1);
+
+        assertFalse(pp.hasSubscribers());
+
+        ts.assertFailureAndMessage(TestException.class, "First", 1);
+    }
+
+    @Test
+    public void immediateInnerNextOuterError2() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        final TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    pp.onError(new TestException("First"));
+                }
+            }
+        };
+
+        pp.concatMap(Functions.justFunction(Flowable.just(1).hide()))
+        .subscribe(ts);
+
+        pp.onNext(1);
+
+        assertFalse(pp.hasSubscribers());
+
+        ts.assertFailureAndMessage(TestException.class, "First", 1);
+    }
+
+    @Test
+    public void concatMapInnerError() {
+        Flowable.just(1).hide()
+        .concatMap(Functions.justFunction(Flowable.error(new TestException())))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void concatMapInnerErrorDelayError() {
+        Flowable.just(1).hide()
+        .concatMapDelayError(Functions.justFunction(Flowable.error(new TestException())))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void badSource() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.concatMap(Functions.justFunction(Flowable.just(1).hide()));
+            }
+        }, true, 1, 1, 1);
+    }
+
+    @Test
+    public void badInnerSource() {
+        @SuppressWarnings("rawtypes")
+        final Subscriber[] ts0 = { null };
+        TestSubscriber<Integer> ts = Flowable.just(1).hide().concatMap(Functions.justFunction(new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> s) {
+                ts0[0] = s;
+                s.onSubscribe(new BooleanSubscription());
+                s.onError(new TestException("First"));
+            }
+        }))
+        .test();
+
+        ts.assertFailureAndMessage(TestException.class, "First");
+
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            ts0[0].onError(new TestException("Second"));
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void badInnerSourceDelayError() {
+        @SuppressWarnings("rawtypes")
+        final Subscriber[] ts0 = { null };
+        TestSubscriber<Integer> ts = Flowable.just(1).hide().concatMapDelayError(Functions.justFunction(new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> s) {
+                ts0[0] = s;
+                s.onSubscribe(new BooleanSubscription());
+                s.onError(new TestException("First"));
+            }
+        }))
+        .test();
+
+        ts.assertFailureAndMessage(TestException.class, "First");
+
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            ts0[0].onError(new TestException("Second"));
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void badSourceDelayError() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.concatMap(Functions.justFunction(Flowable.just(1).hide()));
+            }
+        }, true, 1, 1, 1);
+    }
+
+    @Test
+    public void fusedCrash() {
+        Flowable.range(1, 2)
+        .map(new Function<Integer, Object>() {
+            @Override
+            public Object apply(Integer v) throws Exception { throw new TestException(); }
+        })
+        .concatMap(Functions.justFunction(Flowable.just(1)))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void fusedCrashDelayError() {
+        Flowable.range(1, 2)
+        .map(new Function<Integer, Object>() {
+            @Override
+            public Object apply(Integer v) throws Exception { throw new TestException(); }
+        })
+        .concatMapDelayError(Functions.justFunction(Flowable.just(1)))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void callableCrash() {
+        Flowable.just(1).hide()
+        .concatMap(Functions.justFunction(Flowable.fromCallable(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                throw new TestException();
+            }
+        })))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void callableCrashDelayError() {
+        Flowable.just(1).hide()
+        .concatMapDelayError(Functions.justFunction(Flowable.fromCallable(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                throw new TestException();
+            }
+        })))
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.range(1, 2)
+        .concatMap(Functions.justFunction(Flowable.just(1))));
+
+        TestHelper.checkDisposed(Flowable.range(1, 2)
+        .concatMapDelayError(Functions.justFunction(Flowable.just(1))));
+    }
+
+    @Test
+    public void notVeryEnd() {
+        Flowable.range(1, 2)
+        .concatMapDelayError(Functions.justFunction(Flowable.error(new TestException())), 16, false)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .concatMapDelayError(Functions.justFunction(Flowable.just(2)), 16, false)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void mapperThrows() {
+        Flowable.range(1, 2)
+        .concatMap(new Function<Integer, Publisher<Object>>() {
+            @Override
+            public Publisher<Object> apply(Integer v) throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscription() {
+        final int[] calls = { 0 };
+
+        Flowable<Integer> source = Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        }, BackpressureStrategy.MISSING);
+
+        Flowable.concatArray(source, source).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionDelayError() {
+        final int[] calls = { 0 };
+
+        Flowable<Integer> source = Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        }, BackpressureStrategy.MISSING);
+
+        Flowable.concatArrayDelayError(source, source).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionIterable() {
+        final int[] calls = { 0 };
+
+        Flowable<Integer> source = Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        }, BackpressureStrategy.MISSING);
+
+        Flowable.concat(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionDelayErrorIterable() {
+        final int[] calls = { 0 };
+
+        Flowable<Integer> source = Flowable.create(new FlowableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(FlowableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        }, BackpressureStrategy.MISSING);
+
+        Flowable.concatDelayError(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noCancelPreviousArray() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Flowable<Integer> source = Flowable.just(1).doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        Flowable.concatArray(source, source, source, source, source)
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noCancelPreviousIterable() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Flowable<Integer> source = Flowable.just(1).doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        Flowable.concat(Arrays.asList(source, source, source, source, source))
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.disposables;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.internal.fuseable.QueueDisposable;
 
 /**
@@ -47,41 +48,40 @@ public enum EmptyDisposable implements QueueDisposable<Object> {
         return this == INSTANCE;
     }
 
-    public static void complete(Observer<?> s) {
-        s.onSubscribe(INSTANCE);
-        s.onComplete();
+    public static void complete(Observer<?> observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onComplete();
     }
 
-    public static void complete(MaybeObserver<?> s) {
-        s.onSubscribe(INSTANCE);
-        s.onComplete();
+    public static void complete(MaybeObserver<?> observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onComplete();
     }
 
-    public static void error(Throwable e, Observer<?> s) {
-        s.onSubscribe(INSTANCE);
-        s.onError(e);
+    public static void error(Throwable e, Observer<?> observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onError(e);
     }
 
-    public static void complete(CompletableObserver s) {
-        s.onSubscribe(INSTANCE);
-        s.onComplete();
+    public static void complete(CompletableObserver observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onComplete();
     }
 
-    public static void error(Throwable e, CompletableObserver s) {
-        s.onSubscribe(INSTANCE);
-        s.onError(e);
+    public static void error(Throwable e, CompletableObserver observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onError(e);
     }
 
-    public static void error(Throwable e, SingleObserver<?> s) {
-        s.onSubscribe(INSTANCE);
-        s.onError(e);
+    public static void error(Throwable e, SingleObserver<?> observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onError(e);
     }
 
-    public static void error(Throwable e, MaybeObserver<?> s) {
-        s.onSubscribe(INSTANCE);
-        s.onError(e);
+    public static void error(Throwable e, MaybeObserver<?> observer) {
+        observer.onSubscribe(INSTANCE);
+        observer.onError(e);
     }
-
 
     @Override
     public boolean offer(Object value) {
@@ -93,6 +93,7 @@ public enum EmptyDisposable implements QueueDisposable<Object> {
         throw new UnsupportedOperationException("Should not be called!");
     }
 
+    @Nullable
     @Override
     public Object poll() throws Exception {
         return null; // always empty
@@ -112,6 +113,5 @@ public enum EmptyDisposable implements QueueDisposable<Object> {
     public int requestFusion(int mode) {
         return mode & ASYNC;
     }
-
 
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -26,8 +26,11 @@ import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.*;
-import io.reactivex.exceptions.TestException;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public class ObservableUsingTest {
 
@@ -49,8 +52,8 @@ public class ObservableUsingTest {
     private final Consumer<Disposable> disposeSubscription = new Consumer<Disposable>() {
 
         @Override
-        public void accept(Disposable s) {
-            s.dispose();
+        public void accept(Disposable d) {
+            d.dispose();
         }
 
     };
@@ -182,7 +185,7 @@ public class ObservableUsingTest {
 
         Function<Disposable, Observable<Integer>> observableFactory = new Function<Disposable, Observable<Integer>>() {
             @Override
-            public Observable<Integer> apply(Disposable s) {
+            public Observable<Integer> apply(Disposable d) {
                 return Observable.empty();
             }
         };
@@ -327,8 +330,6 @@ public class ObservableUsingTest {
 
     }
 
-
-
     @Test
     public void testUsingDisposesEagerlyBeforeError() {
         final List<String> events = new ArrayList<String>();
@@ -431,4 +432,178 @@ public class ObservableUsingTest {
         };
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.using(
+                new Callable<Object>() {
+                    @Override
+                    public Object call() throws Exception {
+                        return 1;
+                    }
+                },
+                new Function<Object, ObservableSource<Object>>() {
+                    @Override
+                    public ObservableSource<Object> apply(Object v) throws Exception {
+                        return Observable.never();
+                    }
+                },
+                Functions.emptyConsumer()
+        ));
+    }
+
+    @Test
+    public void supplierDisposerCrash() {
+        TestObserver<Object> to = Observable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Object v) throws Exception {
+                throw new TestException("First");
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailure(CompositeException.class);
+
+        List<Throwable> errors = TestHelper.compositeList(to.errors().get(0));
+
+        TestHelper.assertError(errors, 0, TestException.class, "First");
+        TestHelper.assertError(errors, 1, TestException.class, "Second");
+    }
+
+    @Test
+    public void eagerOnErrorDisposerCrash() {
+        TestObserver<Object> to = Observable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Object v) throws Exception {
+                return Observable.error(new TestException("First"));
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailure(CompositeException.class);
+
+        List<Throwable> errors = TestHelper.compositeList(to.errors().get(0));
+
+        TestHelper.assertError(errors, 0, TestException.class, "First");
+        TestHelper.assertError(errors, 1, TestException.class, "Second");
+    }
+
+    @Test
+    public void eagerOnCompleteDisposerCrash() {
+        Observable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Object v) throws Exception {
+                return Observable.empty();
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailureAndMessage(TestException.class, "Second");
+    }
+
+    @Test
+    public void nonEagerDisposerCrash() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Observable.using(new Callable<Object>() {
+                @Override
+                public Object call() throws Exception {
+                    return 1;
+                }
+            }, new Function<Object, ObservableSource<Object>>() {
+                @Override
+                public ObservableSource<Object> apply(Object v) throws Exception {
+                    return Observable.empty();
+                }
+            }, new Consumer<Object>() {
+                @Override
+                public void accept(Object e) throws Exception {
+                    throw new TestException("Second");
+                }
+            }, false)
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void sourceSupplierReturnsNull() {
+        Observable.using(Functions.justCallable(1),
+                Functions.justFunction((Observable<Object>)null),
+                Functions.emptyConsumer())
+        .test()
+        .assertFailureAndMessage(NullPointerException.class, "The sourceSupplier returned a null ObservableSource")
+        ;
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o)
+                    throws Exception {
+                return Observable.using(Functions.justCallable(1), Functions.justFunction(o), Functions.emptyConsumer());
+            }
+        });
+    }
+
+    @Test
+    public void eagerDisposedOnComplete() {
+        final TestObserver<Integer> to = new TestObserver<Integer>();
+
+        Observable.using(Functions.justCallable(1), Functions.justFunction(new Observable<Integer>() {
+            @Override
+            protected void subscribeActual(Observer<? super Integer> observer) {
+                observer.onSubscribe(Disposables.empty());
+                to.cancel();
+                observer.onComplete();
+            }
+        }), Functions.emptyConsumer(), true)
+        .subscribe(to);
+    }
+
+    @Test
+    public void eagerDisposedOnError() {
+        final TestObserver<Integer> to = new TestObserver<Integer>();
+
+        Observable.using(Functions.justCallable(1), Functions.justFunction(new Observable<Integer>() {
+            @Override
+            protected void subscribeActual(Observer<? super Integer> observer) {
+                observer.onSubscribe(Disposables.empty());
+                to.cancel();
+                observer.onError(new TestException());
+            }
+        }), Functions.emptyConsumer(), true)
+        .subscribe(to);
+    }
 }

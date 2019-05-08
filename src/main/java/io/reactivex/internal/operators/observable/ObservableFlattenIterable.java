@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -45,29 +45,29 @@ public final class ObservableFlattenIterable<T, R> extends AbstractObservableWit
     }
 
     static final class FlattenIterableObserver<T, R> implements Observer<T>, Disposable {
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
 
         final Function<? super T, ? extends Iterable<? extends R>> mapper;
 
-        Disposable d;
+        Disposable upstream;
 
         FlattenIterableObserver(Observer<? super R> actual, Function<? super T, ? extends Iterable<? extends R>> mapper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T value) {
-            if (d == DisposableHelper.DISPOSED) {
+            if (upstream == DisposableHelper.DISPOSED) {
                 return;
             }
 
@@ -77,12 +77,12 @@ public final class ObservableFlattenIterable<T, R> extends AbstractObservableWit
                 it = mapper.apply(value).iterator();
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                d.dispose();
+                upstream.dispose();
                 onError(ex);
                 return;
             }
 
-            Observer<? super R> a = actual;
+            Observer<? super R> a = downstream;
 
             for (;;) {
                 boolean b;
@@ -91,7 +91,7 @@ public final class ObservableFlattenIterable<T, R> extends AbstractObservableWit
                     b = it.hasNext();
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    d.dispose();
+                    upstream.dispose();
                     onError(ex);
                     return;
                 }
@@ -103,7 +103,7 @@ public final class ObservableFlattenIterable<T, R> extends AbstractObservableWit
                         v = ObjectHelper.requireNonNull(it.next(), "The iterator returned a null value");
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        d.dispose();
+                        upstream.dispose();
                         onError(ex);
                         return;
                     }
@@ -117,30 +117,32 @@ public final class ObservableFlattenIterable<T, R> extends AbstractObservableWit
 
         @Override
         public void onError(Throwable e) {
-            if (d == DisposableHelper.DISPOSED) {
+            if (upstream == DisposableHelper.DISPOSED) {
                 RxJavaPlugins.onError(e);
                 return;
             }
-            actual.onError(e);
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            if (d == DisposableHelper.DISPOSED) {
+            if (upstream == DisposableHelper.DISPOSED) {
                 return;
             }
-            actual.onComplete();
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onComplete();
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
         public void dispose() {
-            d.dispose();
-            d = DisposableHelper.DISPOSED;
+            upstream.dispose();
+            upstream = DisposableHelper.DISPOSED;
         }
     }
 }

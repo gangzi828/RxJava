@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -83,5 +83,10 @@ public class TimedTest {
         Timed<Integer> t1 = new Timed<Integer>(1, 5, TimeUnit.SECONDS);
 
         assertEquals("Timed[time=5, unit=SECONDS, value=1]", t1.toString());
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void timeUnitNullFail() throws Exception {
+        new Timed<Integer>(1, 5, null);
     }
 }

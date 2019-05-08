@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,11 +53,13 @@ public class ExceptionsTest {
 
         });
 
-        TestHelper.assertError(errors, 0, RuntimeException.class, "hello");
+        TestHelper.assertError(errors, 0, RuntimeException.class);
+        assertTrue(errors.get(0).toString(), errors.get(0).getMessage().contains("hello"));
         RxJavaPlugins.reset();
     }
 
     /**
+     * Outdated test: Observer should not suppress errors from onCompleted.
      * https://github.com/ReactiveX/RxJava/issues/3885
      */
     @Ignore("v2 components should not throw")
@@ -141,7 +143,7 @@ public class ExceptionsTest {
             }
         });
         a.onNext(1);
-        assertTrue(depth.get() > MAX_STACK_DEPTH);
+        assertTrue(depth.get() >= MAX_STACK_DEPTH);
     }
 
     @Test(expected = StackOverflowError.class)
@@ -199,6 +201,7 @@ public class ExceptionsTest {
     }
 
     /**
+     * Outdated test: throwing from onError handler.
      * https://github.com/ReactiveX/RxJava/issues/969
      */
     @Ignore("v2 components should not throw")
@@ -236,6 +239,7 @@ public class ExceptionsTest {
     }
 
     /**
+     * Outdated test: throwing from onError.
      * https://github.com/ReactiveX/RxJava/issues/2998
      * @throws Exception on arbitrary errors
      */
@@ -275,6 +279,7 @@ public class ExceptionsTest {
     }
 
     /**
+     * Outdated test: throwing from onError.
      * https://github.com/ReactiveX/RxJava/issues/2998
      * @throws Exception on arbitrary errors
      */
@@ -318,13 +323,13 @@ public class ExceptionsTest {
     public void testOnErrorExceptionIsThrownFromSubscribe() {
         Observable.unsafeCreate(new ObservableSource<Integer>() {
                               @Override
-                              public void subscribe(Observer<? super Integer> s1) {
+                              public void subscribe(Observer<? super Integer> observer1) {
                                   Observable.unsafeCreate(new ObservableSource<Integer>() {
                                       @Override
-                                      public void subscribe(Observer<? super Integer> s2) {
+                                      public void subscribe(Observer<? super Integer> observer2) {
                                           throw new IllegalArgumentException("original exception");
                                       }
-                                  }).subscribe(s1);
+                                  }).subscribe(observer1);
                               }
                           }
         ).subscribe(new OnErrorFailedSubscriber());
@@ -335,13 +340,13 @@ public class ExceptionsTest {
     public void testOnErrorExceptionIsThrownFromUnsafeSubscribe() {
         Observable.unsafeCreate(new ObservableSource<Integer>() {
                               @Override
-                              public void subscribe(Observer<? super Integer> s1) {
+                              public void subscribe(Observer<? super Integer> observer1) {
                                   Observable.unsafeCreate(new ObservableSource<Integer>() {
                                       @Override
-                                      public void subscribe(Observer<? super Integer> s2) {
+                                      public void subscribe(Observer<? super Integer> observer2) {
                                           throw new IllegalArgumentException("original exception");
                                       }
-                                  }).subscribe(s1);
+                                  }).subscribe(observer1);
                               }
                           }
         ).subscribe(new OnErrorFailedSubscriber());
@@ -365,13 +370,13 @@ public class ExceptionsTest {
     public void testOnErrorExceptionIsThrownFromSingleSubscribe() {
         Single.unsafeCreate(new SingleSource<Integer>() {
                           @Override
-                          public void subscribe(SingleObserver<? super Integer> s1) {
+                          public void subscribe(SingleObserver<? super Integer> observer1) {
                               Single.unsafeCreate(new SingleSource<Integer>() {
                                   @Override
-                                  public void subscribe(SingleObserver<? super Integer> s2) {
+                                  public void subscribe(SingleObserver<? super Integer> observer2) {
                                       throw new IllegalArgumentException("original exception");
                                   }
-                              }).subscribe(s1);
+                              }).subscribe(observer1);
                           }
                       }
         ).toObservable().subscribe(new OnErrorFailedSubscriber());
@@ -382,13 +387,13 @@ public class ExceptionsTest {
     public void testOnErrorExceptionIsThrownFromSingleUnsafeSubscribe() {
         Single.unsafeCreate(new SingleSource<Integer>() {
                           @Override
-                          public void subscribe(final SingleObserver<? super Integer> s1) {
+                          public void subscribe(final SingleObserver<? super Integer> observer1) {
                               Single.unsafeCreate(new SingleSource<Integer>() {
                                   @Override
-                                  public void subscribe(SingleObserver<? super Integer> s2) {
+                                  public void subscribe(SingleObserver<? super Integer> observer2) {
                                       throw new IllegalArgumentException("original exception");
                                   }
-                              }).toFlowable().subscribe(new Subscriber<Integer>() {
+                              }).toFlowable().subscribe(new FlowableSubscriber<Integer>() {
 
                                   @Override
                                   public void onSubscribe(Subscription s) {
@@ -401,12 +406,12 @@ public class ExceptionsTest {
 
                                   @Override
                                   public void onError(Throwable e) {
-                                      s1.onError(e);
+                                      observer1.onError(e);
                                   }
 
                                   @Override
                                   public void onNext(Integer v) {
-                                      s1.onSuccess(v);
+                                      observer1.onSuccess(v);
                                   }
 
                               });
@@ -491,4 +496,26 @@ public class ExceptionsTest {
         }
     }
 
+    @Test
+    public void errorNotImplementedNull1() {
+        OnErrorNotImplementedException ex = new OnErrorNotImplementedException(null);
+
+        assertTrue("" + ex.getCause(), ex.getCause() instanceof NullPointerException);
+    }
+
+    @Test
+    public void errorNotImplementedNull2() {
+        OnErrorNotImplementedException ex = new OnErrorNotImplementedException("Message", null);
+
+        assertTrue("" + ex.getCause(), ex.getCause() instanceof NullPointerException);
+    }
+
+    @Test
+    public void errorNotImplementedWithCause() {
+        OnErrorNotImplementedException ex = new OnErrorNotImplementedException("Message", new TestException("Forced failure"));
+
+        assertTrue("" + ex.getCause(), ex.getCause() instanceof TestException);
+
+        assertEquals("" + ex.getCause(), "Forced failure", ex.getCause().getMessage());
+    }
 }

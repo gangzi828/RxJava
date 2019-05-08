@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,33 +13,83 @@
 
 package io.reactivex.subscribers;
 
-import org.reactivestreams.*;
+import org.reactivestreams.Subscription;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
+import io.reactivex.internal.util.EndConsumerHelper;
 
 /**
- * Abstract base implementation of a Subscriber with support for requesting via
- * {@link #request(long)}, cancelling via
+ * Abstract base implementation of a {@link org.reactivestreams.Subscriber Subscriber} with
+ * support for requesting via {@link #request(long)}, cancelling via
  * via {@link #cancel()} (both synchronously) and calls {@link #onStart()}
  * when the subscription happens.
  *
+ * <p>All pre-implemented final methods are thread-safe.
+ *
+ * <p>The default {@link #onStart()} requests Long.MAX_VALUE by default. Override
+ * the method to request a custom <em>positive</em> amount.
+ *
+ * <p>Note that calling {@link #request(long)} from {@link #onStart()} may trigger
+ * an immediate, asynchronous emission of data to {@link #onNext(Object)}. Make sure
+ * all initialization happens before the call to {@code request()} in {@code onStart()}.
+ * Calling {@link #request(long)} inside {@link #onNext(Object)} can happen at any time
+ * because by design, {@code onNext} calls from upstream are non-reentrant and non-overlapping.
+ *
+ * <p>Use the protected {@link #cancel()} to cancel the sequence from within an
+ * {@code onNext} implementation.
+ *
+ * <p>Like all other consumers, {@code DefaultSubscriber} can be subscribed only once.
+ * Any subsequent attempt to subscribe it to a new source will yield an
+ * {@link IllegalStateException} with message {@code "It is not allowed to subscribe with a(n) <class name> multiple times."}.
+ *
+ * <p>Implementation of {@link #onStart()}, {@link #onNext(Object)}, {@link #onError(Throwable)}
+ * and {@link #onComplete()} are not allowed to throw any unchecked exceptions.
+ * If for some reason this can't be avoided, use {@link io.reactivex.Flowable#safeSubscribe(org.reactivestreams.Subscriber)}
+ * instead of the standard {@code subscribe()} method.
  * @param <T> the value type
+ *
+ * <p>Example<pre><code>
+ * Flowable.range(1, 5)
+ *     .subscribe(new DefaultSubscriber&lt;Integer&gt;() {
+ *         &#64;Override public void onStart() {
+ *             System.out.println("Start!");
+ *             request(1);
+ *         }
+ *         &#64;Override public void onNext(Integer t) {
+ *             if (t == 3) {
+ *                 cancel();
+ *             }
+ *             System.out.println(t);
+ *             request(1);
+ *         }
+ *         &#64;Override public void onError(Throwable t) {
+ *             t.printStackTrace();
+ *         }
+ *         &#64;Override public void onComplete() {
+ *             System.out.println("Done!");
+ *         }
+ *     });
+ * </code></pre>
  */
-public abstract class DefaultSubscriber<T> implements Subscriber<T> {
-    private Subscription s;
+public abstract class DefaultSubscriber<T> implements FlowableSubscriber<T> {
+
+    Subscription upstream;
+
     @Override
     public final void onSubscribe(Subscription s) {
-        if (SubscriptionHelper.validate(this.s, s)) {
-            this.s = s;
+        if (EndConsumerHelper.validate(this.upstream, s, getClass())) {
+            this.upstream = s;
             onStart();
         }
     }
 
     /**
      * Requests from the upstream Subscription.
+     * @param n the request amount, positive
      */
     protected final void request(long n) {
-        Subscription s = this.s;
+        Subscription s = this.upstream;
         if (s != null) {
             s.request(n);
         }
@@ -49,8 +99,8 @@ public abstract class DefaultSubscriber<T> implements Subscriber<T> {
      * Cancels the upstream's Subscription.
      */
     protected final void cancel() {
-        Subscription s = this.s;
-        this.s = SubscriptionHelper.CANCELLED;
+        Subscription s = this.upstream;
+        this.upstream = SubscriptionHelper.CANCELLED;
         s.cancel();
     }
     /**

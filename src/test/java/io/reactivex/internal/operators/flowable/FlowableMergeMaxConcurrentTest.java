@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -29,13 +29,6 @@ import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableMergeMaxConcurrentTest {
-
-    Subscriber<String> stringObserver;
-
-    @Before
-    public void before() {
-        stringObserver = TestHelper.mockSubscriber();
-    }
 
     @Test
     public void testWhenMaxConcurrentIsOne() {
@@ -136,6 +129,7 @@ public class FlowableMergeMaxConcurrentTest {
         }
         assertEquals(j, n);
     }
+
     @Test
     public void testMergeALotOfSourcesOneByOneSynchronouslyTakeHalf() {
         int n = 10000;
@@ -170,6 +164,7 @@ public class FlowableMergeMaxConcurrentTest {
             ts.assertValueSequence(result);
         }
     }
+
     @Test
     public void testSimpleOneLess() {
         for (int i = 2; i < 100; i++) {
@@ -188,6 +183,7 @@ public class FlowableMergeMaxConcurrentTest {
             ts.assertValueSequence(result);
         }
     }
+
     @Test//(timeout = 20000)
     public void testSimpleAsyncLoop() {
         IoScheduler ios = (IoScheduler)Schedulers.io();
@@ -200,6 +196,7 @@ public class FlowableMergeMaxConcurrentTest {
             }
         }
     }
+
     @Test(timeout = 10000)
     public void testSimpleAsync() {
         for (int i = 1; i < 50; i++) {
@@ -220,12 +217,14 @@ public class FlowableMergeMaxConcurrentTest {
             assertEquals(expected, actual);
         }
     }
+
     @Test(timeout = 10000)
     public void testSimpleOneLessAsyncLoop() {
         for (int i = 0; i < 200; i++) {
             testSimpleOneLessAsync();
         }
     }
+
     @Test(timeout = 10000)
     public void testSimpleOneLessAsync() {
         long t = System.currentTimeMillis();
@@ -250,6 +249,7 @@ public class FlowableMergeMaxConcurrentTest {
             assertEquals(expected, actual);
         }
     }
+
     @Test(timeout = 5000)
     public void testBackpressureHonored() throws Exception {
         List<Flowable<Integer>> sourceList = new ArrayList<Flowable<Integer>>(3);
@@ -280,6 +280,7 @@ public class FlowableMergeMaxConcurrentTest {
 
         ts.dispose();
     }
+
     @Test(timeout = 5000)
     public void testTake() throws Exception {
         List<Flowable<Integer>> sourceList = new ArrayList<Flowable<Integer>>(3);

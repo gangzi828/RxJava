@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,7 +23,6 @@ import org.junit.Test;
 import io.reactivex.TestHelper;
 import io.reactivex.disposables.*;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
 
 public class DisposableHelperTest {
     @Test
@@ -53,7 +52,7 @@ public class DisposableHelperTest {
 
     @Test
     public void disposeRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final AtomicReference<Disposable> d = new AtomicReference<Disposable>();
 
             Runnable r = new Runnable() {
@@ -63,13 +62,13 @@ public class DisposableHelperTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 
     @Test
     public void setReplace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final AtomicReference<Disposable> d = new AtomicReference<Disposable>();
 
             Runnable r = new Runnable() {
@@ -79,13 +78,13 @@ public class DisposableHelperTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 
     @Test
     public void setRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final AtomicReference<Disposable> d = new AtomicReference<Disposable>();
 
             Runnable r = new Runnable() {
@@ -95,7 +94,7 @@ public class DisposableHelperTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 
@@ -117,5 +116,30 @@ public class DisposableHelperTest {
         DisposableHelper.dispose(d);
 
         assertTrue(u.isDisposed());
+    }
+
+    @Test
+    public void trySet() {
+        AtomicReference<Disposable> ref = new AtomicReference<Disposable>();
+
+        Disposable d1 = Disposables.empty();
+
+        assertTrue(DisposableHelper.trySet(ref, d1));
+
+        Disposable d2 = Disposables.empty();
+
+        assertFalse(DisposableHelper.trySet(ref, d2));
+
+        assertFalse(d1.isDisposed());
+
+        assertFalse(d2.isDisposed());
+
+        DisposableHelper.dispose(ref);
+
+        Disposable d3 = Disposables.empty();
+
+        assertFalse(DisposableHelper.trySet(ref, d3));
+
+        assertTrue(d3.isDisposed());
     }
 }

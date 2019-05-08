@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,16 +18,26 @@ package io.reactivex;
  */
 public enum BackpressureStrategy {
     /**
-     * Buffer all values (unbounded) until there is a downstream demand for it.
+     * OnNext events are written without any buffering or dropping.
+     * Downstream has to deal with any overflow.
+     * <p>Useful when one applies one of the custom-parameter onBackpressureXXX operators.
+     */
+    MISSING,
+    /**
+     * Signals a MissingBackpressureException in case the downstream can't keep up.
+     */
+    ERROR,
+    /**
+     * Buffers <em>all</em> onNext values until the downstream consumes it.
      */
     BUFFER,
     /**
-     * Drop the value if there is no current demand for it from the downstream.
+     * Drops the most recent onNext value if the downstream can't keep up.
      */
     DROP,
     /**
-     * Have a latest value always available and overwrite it with more recent ones
-     * if there is no demand for it from the downstream.
+     * Keeps only the latest onNext value, overwriting any previous value if the
+     * downstream can't keep up.
      */
     LATEST
 }

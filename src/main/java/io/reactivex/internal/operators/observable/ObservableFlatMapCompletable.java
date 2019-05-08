@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.operators.observable;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Function;
@@ -51,7 +52,7 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
     implements Observer<T> {
         private static final long serialVersionUID = 8443155186132538303L;
 
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
 
         final AtomicThrowable errors;
 
@@ -61,10 +62,12 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
 
         final CompositeDisposable set;
 
-        Disposable d;
+        Disposable upstream;
+
+        volatile boolean disposed;
 
         FlatMapCompletableMainObserver(Observer<? super T> observer, Function<? super T, ? extends CompletableSource> mapper, boolean delayErrors) {
-            this.actual = observer;
+            this.downstream = observer;
             this.mapper = mapper;
             this.delayErrors = delayErrors;
             this.errors = new AtomicThrowable();
@@ -74,10 +77,10 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -89,7 +92,7 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
                 cs = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null CompletableSource");
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                d.dispose();
+                upstream.dispose();
                 onError(ex);
                 return;
             }
@@ -98,9 +101,9 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
 
             InnerObserver inner = new InnerObserver();
 
-            set.add(inner);
-
-            cs.subscribe(inner);
+            if (!disposed && set.add(inner)) {
+                cs.subscribe(inner);
+            }
         }
 
         @Override
@@ -109,15 +112,13 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
                 if (delayErrors) {
                     if (decrementAndGet() == 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     }
                 } else {
                     dispose();
                     if (getAndSet(0) > 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     }
                 }
             } else {
@@ -128,28 +129,28 @@ public final class ObservableFlatMapCompletable<T> extends AbstractObservableWit
         @Override
         public void onComplete() {
             if (decrementAndGet() == 0) {
-                if (delayErrors) {
-                    Throwable ex = errors.terminate();
-                    if (ex != null) {
-                        actual.onError(ex);
-                        return;
-                    }
+                Throwable ex = errors.terminate();
+                if (ex != null) {
+                    downstream.onError(ex);
+                } else {
+                    downstream.onComplete();
                 }
-                actual.onComplete();
             }
         }
 
         @Override
         public void dispose() {
-            d.dispose();
+            disposed = true;
+            upstream.dispose();
             set.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             return null; // always empty

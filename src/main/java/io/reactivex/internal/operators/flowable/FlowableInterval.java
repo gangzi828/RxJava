@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,9 +19,11 @@ import java.util.concurrent.atomic.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.Scheduler.Worker;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.MissingBackpressureException;
-import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.schedulers.TrampolineScheduler;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 
@@ -43,9 +45,16 @@ public final class FlowableInterval extends Flowable<Long> {
         IntervalSubscriber is = new IntervalSubscriber(s);
         s.onSubscribe(is);
 
-        Disposable d = scheduler.schedulePeriodicallyDirect(is, initialDelay, period, unit);
+        Scheduler sch = scheduler;
 
-        is.setResource(d);
+        if (sch instanceof TrampolineScheduler) {
+            Worker worker = sch.createWorker();
+            is.setResource(worker);
+            worker.schedulePeriodically(is, initialDelay, period, unit);
+        } else {
+            Disposable d = sch.schedulePeriodicallyDirect(is, initialDelay, period, unit);
+            is.setResource(d);
+        }
     }
 
     static final class IntervalSubscriber extends AtomicLong
@@ -53,14 +62,14 @@ public final class FlowableInterval extends Flowable<Long> {
 
         private static final long serialVersionUID = -2809475196591179431L;
 
-        final Subscriber<? super Long> actual;
+        final Subscriber<? super Long> downstream;
 
         long count;
 
         final AtomicReference<Disposable> resource = new AtomicReference<Disposable>();
 
-        IntervalSubscriber(Subscriber<? super Long> actual) {
-            this.actual = actual;
+        IntervalSubscriber(Subscriber<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
@@ -81,16 +90,11 @@ public final class FlowableInterval extends Flowable<Long> {
                 long r = get();
 
                 if (r != 0L) {
-                    actual.onNext(count++);
-                    if (r != Long.MAX_VALUE) {
-                        decrementAndGet();
-                    }
+                    downstream.onNext(count++);
+                    BackpressureHelper.produced(this, 1);
                 } else {
-                    try {
-                        actual.onError(new MissingBackpressureException("Can't deliver value " + count + " due to lack of requests"));
-                    } finally {
-                        DisposableHelper.dispose(resource);
-                    }
+                    downstream.onError(new MissingBackpressureException("Can't deliver value " + count + " due to lack of requests"));
+                    DisposableHelper.dispose(resource);
                 }
             }
         }

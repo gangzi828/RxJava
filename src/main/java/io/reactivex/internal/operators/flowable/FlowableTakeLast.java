@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,13 +18,14 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 
 public final class FlowableTakeLast<T> extends AbstractFlowableWithUpstream<T, T> {
     final int count;
 
-    public FlowableTakeLast(Publisher<T> source, int count) {
+    public FlowableTakeLast(Flowable<T> source, int count) {
         super(source);
         this.count = count;
     }
@@ -34,13 +35,13 @@ public final class FlowableTakeLast<T> extends AbstractFlowableWithUpstream<T, T
         source.subscribe(new TakeLastSubscriber<T>(s, count));
     }
 
-    static final class TakeLastSubscriber<T> extends ArrayDeque<T> implements Subscriber<T>, Subscription {
+    static final class TakeLastSubscriber<T> extends ArrayDeque<T> implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = 7240042530241604978L;
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final int count;
 
-        Subscription s;
+        Subscription upstream;
         volatile boolean done;
         volatile boolean cancelled;
 
@@ -49,15 +50,15 @@ public final class FlowableTakeLast<T> extends AbstractFlowableWithUpstream<T, T
         final AtomicInteger wip = new AtomicInteger();
 
         TakeLastSubscriber(Subscriber<? super T> actual, int count) {
-            this.actual = actual;
+            this.downstream = actual;
             this.count = count;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -72,7 +73,7 @@ public final class FlowableTakeLast<T> extends AbstractFlowableWithUpstream<T, T
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -92,12 +93,12 @@ public final class FlowableTakeLast<T> extends AbstractFlowableWithUpstream<T, T
         @Override
         public void cancel() {
             cancelled = true;
-            s.cancel();
+            upstream.cancel();
         }
 
         void drain() {
             if (wip.getAndIncrement() == 0) {
-                Subscriber<? super T> a = actual;
+                Subscriber<? super T> a = downstream;
                 long r = requested.get();
                 do {
                     if (cancelled) {

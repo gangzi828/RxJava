@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex;
 
+import io.reactivex.annotations.*;
 import org.reactivestreams.Publisher;
 
 /**
@@ -27,8 +28,7 @@ public interface FlowableTransformer<Upstream, Downstream> {
      * optionally different element type.
      * @param upstream the upstream Flowable instance
      * @return the transformed Publisher instance
-     * @throws Exception in case the transformation throws, checked exceptions will be wrapped
-     * into a RuntimeException
      */
-    Publisher<Downstream> apply(Flowable<Upstream> upstream) throws Exception;
+    @NonNull
+    Publisher<Downstream> apply(@NonNull Flowable<Upstream> upstream);
 }

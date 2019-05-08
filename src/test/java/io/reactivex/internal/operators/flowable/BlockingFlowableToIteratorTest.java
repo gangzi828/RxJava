@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,15 +13,16 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 
-import java.util.Iterator;
+import java.util.*;
 
 import org.junit.*;
 import org.reactivestreams.*;
 
 import io.reactivex.Flowable;
-import io.reactivex.exceptions.TestException;
+import io.reactivex.exceptions.*;
+import io.reactivex.internal.operators.flowable.BlockingFlowableIterable.BlockingFlowableIterator;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
 
 public class BlockingFlowableToIteratorTest {
@@ -50,10 +51,10 @@ public class BlockingFlowableToIteratorTest {
         Flowable<String> obs = Flowable.unsafeCreate(new Publisher<String>() {
 
             @Override
-            public void subscribe(Subscriber<? super String> observer) {
-                observer.onSubscribe(new BooleanSubscription());
-                observer.onNext("one");
-                observer.onError(new TestException());
+            public void subscribe(Subscriber<? super String> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
+                subscriber.onNext("one");
+                subscriber.onError(new TestException());
             }
         });
 
@@ -130,5 +131,58 @@ public class BlockingFlowableToIteratorTest {
         public void remove() {
             throw new UnsupportedOperationException();
         }
+    }
+
+    @Test(expected = UnsupportedOperationException.class)
+    public void remove() {
+        BlockingFlowableIterator<Integer> it = new BlockingFlowableIterator<Integer>(128);
+        it.remove();
+    }
+
+    @Test
+    public void dispose() {
+        BlockingFlowableIterator<Integer> it = new BlockingFlowableIterator<Integer>(128);
+
+        assertFalse(it.isDisposed());
+
+        it.dispose();
+
+        assertTrue(it.isDisposed());
+    }
+
+    @Test
+    public void interruptWait() {
+        BlockingFlowableIterator<Integer> it = new BlockingFlowableIterator<Integer>(128);
+
+        try {
+            Thread.currentThread().interrupt();
+
+            it.hasNext();
+        } catch (RuntimeException ex) {
+            assertTrue(ex.toString(), ex.getCause() instanceof InterruptedException);
+        }
+    }
+
+    @Test(expected = NoSuchElementException.class)
+    public void emptyThrowsNoSuch() {
+        BlockingFlowableIterator<Integer> it = new BlockingFlowableIterator<Integer>(128);
+        it.onComplete();
+        it.next();
+    }
+
+    @Test(expected = MissingBackpressureException.class)
+    public void overflowQueue() {
+        Iterator<Integer> it = new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> s) {
+                s.onSubscribe(new BooleanSubscription());
+                s.onNext(1);
+                s.onNext(2);
+            }
+        }
+        .blockingIterable(1)
+        .iterator();
+
+        it.next();
     }
 }

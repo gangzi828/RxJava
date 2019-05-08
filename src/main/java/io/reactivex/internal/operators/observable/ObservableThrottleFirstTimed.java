@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -44,71 +44,49 @@ public final class ObservableThrottleFirstTimed<T> extends AbstractObservableWit
     }
 
     static final class DebounceTimedObserver<T>
+    extends AtomicReference<Disposable>
     implements Observer<T>, Disposable, Runnable {
-        final Observer<? super T> actual;
+        private static final long serialVersionUID = 786994795061867455L;
+
+        final Observer<? super T> downstream;
         final long timeout;
         final TimeUnit unit;
         final Scheduler.Worker worker;
 
-        Disposable s;
-
-        final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
-
-        static final Disposable NEW_TIMER = new Disposable() {
-            @Override
-            public void dispose() { }
-
-            @Override
-            public boolean isDisposed() {
-                return true;
-            }
-        };
+        Disposable upstream;
 
         volatile boolean gate;
 
         boolean done;
 
         DebounceTimedObserver(Observer<? super T> actual, long timeout, TimeUnit unit, Worker worker) {
-            this.actual = actual;
+            this.downstream = actual;
             this.timeout = timeout;
             this.unit = unit;
             this.worker = worker;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T t) {
-            if (done) {
-                return;
-            }
-
-            if (!gate) {
+            if (!gate && !done) {
                 gate = true;
 
-                actual.onNext(t);
+                downstream.onNext(t);
 
-                // FIXME should this be a periodic blocking or a value-relative blocking?
-                Disposable d = timer.get();
+                Disposable d = get();
                 if (d != null) {
                     d.dispose();
                 }
-
-                if (timer.compareAndSet(d, NEW_TIMER)) {
-                    d = worker.schedule(this, timeout, unit);
-                    if (!timer.compareAndSet(NEW_TIMER, d)) {
-                        d.dispose();
-                    }
-                }
+                DisposableHelper.replace(this, worker.schedule(this, timeout, unit));
             }
-
-
         }
 
         @Override
@@ -120,34 +98,31 @@ public final class ObservableThrottleFirstTimed<T> extends AbstractObservableWit
         public void onError(Throwable t) {
             if (done) {
                 RxJavaPlugins.onError(t);
-                return;
+            } else {
+                done = true;
+                downstream.onError(t);
+                worker.dispose();
             }
-            done = true;
-            DisposableHelper.dispose(timer);
-            actual.onError(t);
         }
 
         @Override
         public void onComplete() {
-            if (done) {
-                return;
+            if (!done) {
+                done = true;
+                downstream.onComplete();
+                worker.dispose();
             }
-            done = true;
-            DisposableHelper.dispose(timer);
-            worker.dispose();
-            actual.onComplete();
         }
 
         @Override
         public void dispose() {
-            DisposableHelper.dispose(timer);
+            upstream.dispose();
             worker.dispose();
-            s.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return timer.get() == DisposableHelper.DISPOSED;
+            return worker.isDisposed();
         }
     }
 }

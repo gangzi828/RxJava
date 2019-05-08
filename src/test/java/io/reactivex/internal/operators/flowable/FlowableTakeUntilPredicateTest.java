@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,68 +13,78 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+
+import java.util.List;
 
 import org.junit.Test;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
-import io.reactivex.functions.Predicate;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.processors.PublishProcessor;
 import io.reactivex.subscribers.TestSubscriber;
 ;
 
 public class FlowableTakeUntilPredicateTest {
     @Test
     public void takeEmpty() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Flowable.empty().takeUntil(new Predicate<Object>() {
             @Override
             public boolean test(Object v) {
                 return true;
             }
-        }).subscribe(o);
+        }).subscribe(subscriber);
 
-        verify(o, never()).onNext(any());
-        verify(o, never()).onError(any(Throwable.class));
-        verify(o).onComplete();
+        verify(subscriber, never()).onNext(any());
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
     }
+
     @Test
     public void takeAll() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Flowable.just(1, 2).takeUntil(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return false;
             }
-        }).subscribe(o);
+        }).subscribe(subscriber);
 
-        verify(o).onNext(1);
-        verify(o).onNext(2);
-        verify(o, never()).onError(any(Throwable.class));
-        verify(o).onComplete();
+        verify(subscriber).onNext(1);
+        verify(subscriber).onNext(2);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
     }
+
     @Test
     public void takeFirst() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Flowable.just(1, 2).takeUntil(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
             }
-        }).subscribe(o);
+        }).subscribe(subscriber);
 
-        verify(o).onNext(1);
-        verify(o, never()).onNext(2);
-        verify(o, never()).onError(any(Throwable.class));
-        verify(o).onComplete();
+        verify(subscriber).onNext(1);
+        verify(subscriber, never()).onNext(2);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
     }
+
     @Test
     public void takeSome() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Flowable.just(1, 2, 3).takeUntil(new Predicate<Integer>() {
             @Override
@@ -82,17 +92,18 @@ public class FlowableTakeUntilPredicateTest {
                 return t1 == 2;
             }
         })
-        .subscribe(o);
+        .subscribe(subscriber);
 
-        verify(o).onNext(1);
-        verify(o).onNext(2);
-        verify(o, never()).onNext(3);
-        verify(o, never()).onError(any(Throwable.class));
-        verify(o).onComplete();
+        verify(subscriber).onNext(1);
+        verify(subscriber).onNext(2);
+        verify(subscriber, never()).onNext(3);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
     }
+
     @Test
     public void functionThrows() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Predicate<Integer> predicate = new Predicate<Integer>() {
             @Override
@@ -100,17 +111,18 @@ public class FlowableTakeUntilPredicateTest {
                     throw new TestException("Forced failure");
             }
         };
-        Flowable.just(1, 2, 3).takeUntil(predicate).subscribe(o);
+        Flowable.just(1, 2, 3).takeUntil(predicate).subscribe(subscriber);
 
-        verify(o).onNext(1);
-        verify(o, never()).onNext(2);
-        verify(o, never()).onNext(3);
-        verify(o).onError(any(TestException.class));
-        verify(o, never()).onComplete();
+        verify(subscriber).onNext(1);
+        verify(subscriber, never()).onNext(2);
+        verify(subscriber, never()).onNext(3);
+        verify(subscriber).onError(any(TestException.class));
+        verify(subscriber, never()).onComplete();
     }
+
     @Test
     public void sourceThrows() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
         Flowable.just(1)
         .concatWith(Flowable.<Integer>error(new TestException()))
@@ -120,13 +132,14 @@ public class FlowableTakeUntilPredicateTest {
             public boolean test(Integer v) {
                 return false;
             }
-        }).subscribe(o);
+        }).subscribe(subscriber);
 
-        verify(o).onNext(1);
-        verify(o, never()).onNext(2);
-        verify(o).onError(any(TestException.class));
-        verify(o, never()).onComplete();
+        verify(subscriber).onNext(1);
+        verify(subscriber, never()).onNext(2);
+        verify(subscriber).onError(any(TestException.class));
+        verify(subscriber, never()).onComplete();
     }
+
     @Test
     public void backpressure() {
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>(5L);
@@ -160,5 +173,44 @@ public class FlowableTakeUntilPredicateTest {
         ts.assertError(TestException.class);
         // FIXME last cause value is not saved
 //        assertTrue(ts.errors().get(0).getCause().getMessage().contains("abc"));
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishProcessor.create().takeUntil(Functions.alwaysFalse()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.takeUntil(Functions.alwaysFalse());
+            }
+        });
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+                    subscriber.onComplete();
+                    subscriber.onNext(1);
+                    subscriber.onError(new TestException());
+                    subscriber.onComplete();
+                }
+            }
+            .takeUntil(Functions.alwaysFalse())
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

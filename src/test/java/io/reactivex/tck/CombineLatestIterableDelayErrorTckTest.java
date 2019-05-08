@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -27,7 +27,7 @@ public class CombineLatestIterableDelayErrorTckTest extends BaseTck<Long> {
     @SuppressWarnings("unchecked")
     @Override
     public Publisher<Long> createPublisher(long elements) {
-        return FlowableTck.wrap(
+        return
             Flowable.combineLatestDelayError(Arrays.asList(
                     Flowable.just(1L),
                     Flowable.fromIterable(iterate(elements))
@@ -39,6 +39,6 @@ public class CombineLatestIterableDelayErrorTckTest extends BaseTck<Long> {
                     }
                 }
             )
-        );
+        ;
     }
 }

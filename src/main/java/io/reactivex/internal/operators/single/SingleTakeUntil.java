@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -57,18 +57,19 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
 
         private static final long serialVersionUID = -622603812305745221L;
 
-        final SingleObserver<? super T> actual;
+        final SingleObserver<? super T> downstream;
 
         final TakeUntilOtherSubscriber other;
 
-        TakeUntilMainObserver(SingleObserver<? super T> actual) {
-            this.actual = actual;
+        TakeUntilMainObserver(SingleObserver<? super T> downstream) {
+            this.downstream = downstream;
             this.other = new TakeUntilOtherSubscriber(this);
         }
 
         @Override
         public void dispose() {
             DisposableHelper.dispose(this);
+            other.dispose();
         }
 
         @Override
@@ -85,12 +86,9 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
         public void onSuccess(T value) {
             other.dispose();
 
-            Disposable a = get();
+            Disposable a = getAndSet(DisposableHelper.DISPOSED);
             if (a != DisposableHelper.DISPOSED) {
-                a = getAndSet(DisposableHelper.DISPOSED);
-                if (a != DisposableHelper.DISPOSED) {
-                    actual.onSuccess(value);
-                }
+                downstream.onSuccess(value);
             }
         }
 
@@ -102,7 +100,7 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
             if (a != DisposableHelper.DISPOSED) {
                 a = getAndSet(DisposableHelper.DISPOSED);
                 if (a != DisposableHelper.DISPOSED) {
-                    actual.onError(e);
+                    downstream.onError(e);
                     return;
                 }
             }
@@ -117,7 +115,7 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
                     if (a != null) {
                         a.dispose();
                     }
-                    actual.onError(e);
+                    downstream.onError(e);
                     return;
                 }
             }
@@ -127,7 +125,7 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
 
     static final class TakeUntilOtherSubscriber
     extends AtomicReference<Subscription>
-    implements Subscriber<Object> {
+    implements FlowableSubscriber<Object> {
 
         private static final long serialVersionUID = 5170026210238877381L;
 
@@ -139,15 +137,13 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this, s)) {
-                s.request(Long.MAX_VALUE);
-            }
+            SubscriptionHelper.setOnce(this, s, Long.MAX_VALUE);
         }
 
         @Override
         public void onNext(Object t) {
             if (SubscriptionHelper.cancel(this)) {
-                onComplete();
+                parent.otherError(new CancellationException());
             }
         }
 
@@ -158,7 +154,10 @@ public final class SingleTakeUntil<T, U> extends Single<T> {
 
         @Override
         public void onComplete() {
-            parent.otherError(new CancellationException());
+            if (get() != SubscriptionHelper.CANCELLED) {
+                lazySet(SubscriptionHelper.CANCELLED);
+                parent.otherError(new CancellationException());
+            }
         }
 
         public void dispose() {

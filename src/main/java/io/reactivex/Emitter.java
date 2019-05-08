@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,9 +12,16 @@
  */
 package io.reactivex;
 
+import io.reactivex.annotations.NonNull;
+
 /**
  * Base interface for emitting signals in a push-fashion in various generator-like source
  * operators (create, generate).
+ * <p>
+ * Note that the {@link Emitter#onNext}, {@link Emitter#onError} and
+ * {@link Emitter#onComplete} methods provided to the function via the {@link Emitter} instance should be called synchronously,
+ * never concurrently. Calling them from multiple threads is not supported and leads to an
+ * undefined behavior.
  *
  * @param <T> the value type emitted
  */
@@ -24,13 +31,13 @@ public interface Emitter<T> {
      * Signal a normal value.
      * @param value the value to signal, not null
      */
-    void onNext(T value);
+    void onNext(@NonNull T value);
 
     /**
      * Signal a Throwable exception.
      * @param error the Throwable to signal, not null
      */
-    void onError(Throwable error);
+    void onError(@NonNull Throwable error);
 
     /**
      * Signal a completion.

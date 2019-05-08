@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,6 +12,8 @@
  */
 package io.reactivex;
 
+import io.reactivex.annotations.*;
+
 /**
  * A functional interface that has a {@code subscribe()} method that receives
  * an instance of a {@link SingleEmitter} instance that allows pushing
@@ -23,9 +25,9 @@ public interface SingleOnSubscribe<T> {
 
     /**
      * Called for each SingleObserver that subscribes.
-     * @param e the safe emitter instance, never null
+     * @param emitter the safe emitter instance, never null
      * @throws Exception on error
      */
-    void subscribe(SingleEmitter<T> e) throws Exception;
+    void subscribe(@NonNull SingleEmitter<T> emitter) throws Exception;
 }
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,7 +13,7 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 import java.util.concurrent.Callable;
 
@@ -174,5 +174,74 @@ public class FlowableScalarXMapTest {
         })
         .test()
         .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void scalarDisposableStateCheck() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+        ScalarSubscription<Integer> sd = new ScalarSubscription<Integer>(ts, 1);
+        ts.onSubscribe(sd);
+
+        assertFalse(sd.isCancelled());
+
+        assertTrue(sd.isEmpty());
+
+        sd.request(1);
+
+        assertFalse(sd.isCancelled());
+
+        assertTrue(sd.isEmpty());
+
+        ts.assertResult(1);
+
+        try {
+            sd.offer(1);
+            fail("Should have thrown");
+        } catch (UnsupportedOperationException ex) {
+            // expected
+        }
+
+        try {
+            sd.offer(1, 2);
+            fail("Should have thrown");
+        } catch (UnsupportedOperationException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void scalarDisposableRunDisposeRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+            final ScalarSubscription<Integer> sd = new ScalarSubscription<Integer>(ts, 1);
+            ts.onSubscribe(sd);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    sd.request(1);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    sd.cancel();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void cancelled() {
+        ScalarSubscription<Integer> scalar = new ScalarSubscription<Integer>(new TestSubscriber<Integer>(), 1);
+
+        assertFalse(scalar.isCancelled());
+
+        scalar.cancel();
+
+        assertTrue(scalar.isCancelled());
     }
 }

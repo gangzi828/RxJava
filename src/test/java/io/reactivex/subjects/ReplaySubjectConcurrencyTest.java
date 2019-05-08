@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -288,17 +288,18 @@ public class ReplaySubjectConcurrencyTest {
     }
 
     /**
+     * Make sure emission-subscription races are handled correctly.
      * https://github.com/ReactiveX/RxJava/issues/1147
      */
     @Test
     public void testRaceForTerminalState() {
         final List<Integer> expected = Arrays.asList(1);
         for (int i = 0; i < 100000; i++) {
-            TestObserver<Integer> ts = new TestObserver<Integer>();
-            Observable.just(1).subscribeOn(Schedulers.computation()).cache().subscribe(ts);
-            ts.awaitTerminalEvent();
-            ts.assertValueSequence(expected);
-            ts.assertTerminated();
+            TestObserver<Integer> to = new TestObserver<Integer>();
+            Observable.just(1).subscribeOn(Schedulers.computation()).cache().subscribe(to);
+            to.awaitTerminalEvent();
+            to.assertValueSequence(expected);
+            to.assertTerminated();
         }
     }
 
@@ -322,6 +323,7 @@ public class ReplaySubjectConcurrencyTest {
             }
         }
     }
+
     @Test
     public void testReplaySubjectEmissionSubscriptionRace() throws Exception {
         Scheduler s = Schedulers.io();
@@ -395,6 +397,7 @@ public class ReplaySubjectConcurrencyTest {
             worker.dispose();
         }
     }
+
     @Test(timeout = 10000)
     public void testConcurrentSizeAndHasAnyValue() throws InterruptedException {
         final ReplaySubject<Object> rs = ReplaySubject.create();

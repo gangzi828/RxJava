@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,9 +19,9 @@ import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
-import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.observers.SerializedObserver;
-import io.reactivex.plugins.RxJavaPlugins;
 
 public final class ObservableWithLatestFrom<T, U, R> extends AbstractObservableWithUpstream<T, R> {
     final BiFunction<? super T, ? super U, ? extends R> combiner;
@@ -38,27 +38,9 @@ public final class ObservableWithLatestFrom<T, U, R> extends AbstractObservableW
         final SerializedObserver<R> serial = new SerializedObserver<R>(t);
         final WithLatestFromObserver<T, U, R> wlf = new WithLatestFromObserver<T, U, R>(serial, combiner);
 
-        other.subscribe(new Observer<U>() {
-            @Override
-            public void onSubscribe(Disposable s) {
-                wlf.setOther(s);
-            }
+        serial.onSubscribe(wlf);
 
-            @Override
-            public void onNext(U t) {
-                wlf.lazySet(t);
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                wlf.otherError(t);
-            }
-
-            @Override
-            public void onComplete() {
-                // nothing to do, the wlf will complete on its own pace
-            }
-        });
+        other.subscribe(new WithLatestFromOtherObserver(wlf));
 
         source.subscribe(wlf);
     }
@@ -67,22 +49,22 @@ public final class ObservableWithLatestFrom<T, U, R> extends AbstractObservableW
 
         private static final long serialVersionUID = -312246233408980075L;
 
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
+
         final BiFunction<? super T, ? super U, ? extends R> combiner;
 
-        final AtomicReference<Disposable> s = new AtomicReference<Disposable>();
+        final AtomicReference<Disposable> upstream = new AtomicReference<Disposable>();
 
         final AtomicReference<Disposable> other = new AtomicReference<Disposable>();
 
         WithLatestFromObserver(Observer<? super R> actual, BiFunction<? super T, ? super U, ? extends R> combiner) {
-            this.actual = actual;
+            this.downstream = actual;
             this.combiner = combiner;
         }
+
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.setOnce(this.s, s)) {
-                actual.onSubscribe(this);
-            }
+        public void onSubscribe(Disposable d) {
+            DisposableHelper.setOnce(this.upstream, d);
         }
 
         @Override
@@ -91,68 +73,75 @@ public final class ObservableWithLatestFrom<T, U, R> extends AbstractObservableW
             if (u != null) {
                 R r;
                 try {
-                    r = combiner.apply(t, u);
+                    r = ObjectHelper.requireNonNull(combiner.apply(t, u), "The combiner returned a null value");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     dispose();
-                    actual.onError(e);
+                    downstream.onError(e);
                     return;
                 }
-                actual.onNext(r);
+                downstream.onNext(r);
             }
         }
 
         @Override
         public void onError(Throwable t) {
             DisposableHelper.dispose(other);
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             DisposableHelper.dispose(other);
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void dispose() {
-            s.get().dispose();
+            DisposableHelper.dispose(upstream);
             DisposableHelper.dispose(other);
         }
 
-        @Override public boolean isDisposed() {
-            return s.get().isDisposed();
+        @Override
+        public boolean isDisposed() {
+            return DisposableHelper.isDisposed(upstream.get());
         }
 
         public boolean setOther(Disposable o) {
-            for (;;) {
-                Disposable current = other.get();
-                if (current == DisposableHelper.DISPOSED) {
-                    o.dispose();
-                    return false;
-                }
-                if (current != null) {
-                    RxJavaPlugins.onError(new IllegalStateException("Other subscription already set!"));
-                    o.dispose();
-                    return false;
-                }
-                if (other.compareAndSet(null, o)) {
-                    return true;
-                }
-            }
+            return DisposableHelper.setOnce(other, o);
         }
 
         public void otherError(Throwable e) {
-            if (this.s.compareAndSet(null, DisposableHelper.DISPOSED)) {
-                EmptyDisposable.error(e, actual);
-            } else {
-                if (this.s.get() != DisposableHelper.DISPOSED) {
-                    dispose();
-                    actual.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
-            }
+            DisposableHelper.dispose(upstream);
+            downstream.onError(e);
+        }
+    }
+
+    final class WithLatestFromOtherObserver implements Observer<U> {
+        private final WithLatestFromObserver<T, U, R> parent;
+
+        WithLatestFromOtherObserver(WithLatestFromObserver<T, U, R> parent) {
+            this.parent = parent;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            parent.setOther(d);
+        }
+
+        @Override
+        public void onNext(U t) {
+            parent.lazySet(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            parent.otherError(t);
+        }
+
+        @Override
+        public void onComplete() {
+            // nothing to do, the wlf will complete on its own pace
         }
     }
 }

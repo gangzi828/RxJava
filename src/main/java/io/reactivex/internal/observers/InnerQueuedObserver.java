@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -31,7 +31,6 @@ public final class InnerQueuedObserver<T>
 extends AtomicReference<Disposable>
 implements Observer<T>, Disposable {
 
-
     private static final long serialVersionUID = -5417183359794346637L;
 
     final InnerQueuedObserverSupport<T> parent;
@@ -50,23 +49,23 @@ implements Observer<T>, Disposable {
     }
 
     @Override
-    public void onSubscribe(Disposable s) {
-        if (DisposableHelper.setOnce(this, s)) {
-            if (s instanceof QueueDisposable) {
+    public void onSubscribe(Disposable d) {
+        if (DisposableHelper.setOnce(this, d)) {
+            if (d instanceof QueueDisposable) {
                 @SuppressWarnings("unchecked")
-                QueueDisposable<T> qs = (QueueDisposable<T>) s;
+                QueueDisposable<T> qd = (QueueDisposable<T>) d;
 
-                int m = qs.requestFusion(QueueDisposable.ANY);
+                int m = qd.requestFusion(QueueDisposable.ANY);
                 if (m == QueueSubscription.SYNC) {
                     fusionMode = m;
-                    queue = qs;
+                    queue = qd;
                     done = true;
                     parent.innerComplete(this);
                     return;
                 }
                 if (m == QueueDisposable.ASYNC) {
                     fusionMode = m;
-                    queue = qs;
+                    queue = qd;
                     return;
                 }
             }

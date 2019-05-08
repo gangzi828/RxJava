@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.operators.maybe;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.*;
 
+import io.reactivex.annotations.Nullable;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
@@ -71,7 +72,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
 
         private static final long serialVersionUID = -660395290758764731L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
         final CompositeDisposable set;
 
@@ -90,7 +91,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
         long consumed;
 
         MergeMaybeObserver(Subscriber<? super T> actual, int sourceCount, SimpleQueueWithConsumerIndex<Object> queue) {
-            this.actual = actual;
+            this.downstream = actual;
             this.sourceCount = sourceCount;
             this.set = new CompositeDisposable();
             this.requested = new AtomicLong();
@@ -107,6 +108,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
             return NONE;
         }
 
+        @Nullable
         @SuppressWarnings("unchecked")
         @Override
         public T poll() throws Exception {
@@ -182,7 +184,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
         @SuppressWarnings("unchecked")
         void drainNormal() {
             int missed = 1;
-            Subscriber<? super T> a = actual;
+            Subscriber<? super T> a = downstream;
             SimpleQueueWithConsumerIndex<Object> q = queue;
             long e = consumed;
 
@@ -250,7 +252,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
 
         void drainFused() {
             int missed = 1;
-            Subscriber<? super T> a = actual;
+            Subscriber<? super T> a = downstream;
             SimpleQueueWithConsumerIndex<Object> q = queue;
 
             for (;;) {
@@ -299,6 +301,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
 
     interface SimpleQueueWithConsumerIndex<T> extends SimpleQueue<T> {
 
+        @Nullable
         @Override
         T poll();
 
@@ -314,7 +317,6 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
     static final class MpscFillOnceSimpleQueue<T>
     extends AtomicReferenceArray<T>
     implements SimpleQueueWithConsumerIndex<T> {
-
 
         private static final long serialVersionUID = -7969063454040569579L;
         final AtomicInteger producerIndex;
@@ -342,6 +344,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
             throw new UnsupportedOperationException();
         }
 
+        @Nullable
         @Override
         public T poll() {
             int ci = consumerIndex;
@@ -422,6 +425,7 @@ public final class MaybeMergeArray<T> extends Flowable<T> {
             return super.offer(e);
         }
 
+        @Nullable
         @Override
         public T poll() {
             T v = super.poll();

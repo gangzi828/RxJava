@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,7 +24,7 @@ import io.reactivex.internal.functions.ObjectHelper;
 
 /**
  * Maps the success value of the source SingleSource into a Completable.
- * @param <T>
+ * @param <T> the value type of the source SingleSource
  */
 public final class SingleFlatMapCompletable<T> extends Completable {
 
@@ -38,9 +38,9 @@ public final class SingleFlatMapCompletable<T> extends Completable {
     }
 
     @Override
-    protected void subscribeActual(CompletableObserver s) {
-        FlatMapCompletableObserver<T> parent = new FlatMapCompletableObserver<T>(s, mapper);
-        s.onSubscribe(parent);
+    protected void subscribeActual(CompletableObserver observer) {
+        FlatMapCompletableObserver<T> parent = new FlatMapCompletableObserver<T>(observer, mapper);
+        observer.onSubscribe(parent);
         source.subscribe(parent);
     }
 
@@ -50,13 +50,13 @@ public final class SingleFlatMapCompletable<T> extends Completable {
 
         private static final long serialVersionUID = -2177128922851101253L;
 
-        final CompletableObserver actual;
+        final CompletableObserver downstream;
 
         final Function<? super T, ? extends CompletableSource> mapper;
 
         FlatMapCompletableObserver(CompletableObserver actual,
                 Function<? super T, ? extends CompletableSource> mapper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
         }
 
@@ -87,17 +87,19 @@ public final class SingleFlatMapCompletable<T> extends Completable {
                 return;
             }
 
-            cs.subscribe(this);
+            if (!isDisposed()) {
+                cs.subscribe(this);
+            }
         }
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
     }
 }

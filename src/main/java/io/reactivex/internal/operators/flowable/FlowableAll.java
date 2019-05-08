@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@ package io.reactivex.internal.operators.flowable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Predicate;
 import io.reactivex.internal.subscriptions.*;
@@ -23,7 +24,7 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
 
     final Predicate<? super T> predicate;
 
-    public FlowableAll(Publisher<T> source, Predicate<? super T> predicate) {
+    public FlowableAll(Flowable<T> source, Predicate<? super T> predicate) {
         super(source);
         this.predicate = predicate;
     }
@@ -33,12 +34,12 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
         source.subscribe(new AllSubscriber<T>(s, predicate));
     }
 
-    static final class AllSubscriber<T> extends DeferredScalarSubscription<Boolean> implements Subscriber<T> {
+    static final class AllSubscriber<T> extends DeferredScalarSubscription<Boolean> implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -3521127104134758517L;
         final Predicate<? super T> predicate;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
@@ -46,11 +47,12 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
             super(actual);
             this.predicate = predicate;
         }
+
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -65,13 +67,13 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
                 b = predicate.test(t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
+                upstream.cancel();
                 onError(e);
                 return;
             }
             if (!b) {
                 done = true;
-                s.cancel();
+                upstream.cancel();
                 complete(false);
             }
         }
@@ -83,7 +85,7 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -99,7 +101,7 @@ public final class FlowableAll<T> extends AbstractFlowableWithUpstream<T, Boolea
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

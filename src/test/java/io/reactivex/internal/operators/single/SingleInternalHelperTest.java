@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,9 +15,11 @@ package io.reactivex.internal.operators.single;
 
 import static org.junit.Assert.*;
 
+import java.util.*;
+
 import org.junit.Test;
 
-import io.reactivex.TestHelper;
+import io.reactivex.*;
 
 public class SingleInternalHelperTest {
 
@@ -42,5 +44,22 @@ public class SingleInternalHelperTest {
     public void toObservableEnum() {
         assertEquals(1, SingleInternalHelper.ToObservable.values().length);
         assertNotNull(SingleInternalHelper.ToObservable.valueOf("INSTANCE"));
+    }
+
+    @Test
+    public void singleIterableToFlowableIterable() {
+        Iterable<? extends Flowable<Integer>> it = SingleInternalHelper.iterableToFlowable(
+                Collections.singletonList(Single.just(1)));
+
+        Iterator<? extends Flowable<Integer>> iter = it.iterator();
+
+        if (iter.hasNext()) {
+            iter.next().test().assertResult(1);
+            if (iter.hasNext()) {
+                fail("Iterator reports an additional element");
+            }
+        } else {
+            fail("Iterator was empty");
+        }
     }
 }

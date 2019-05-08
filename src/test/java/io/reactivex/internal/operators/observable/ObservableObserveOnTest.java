@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,9 +14,10 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
@@ -24,11 +25,20 @@ import org.junit.Test;
 import org.mockito.InOrder;
 
 import io.reactivex.*;
+import io.reactivex.Observable;
+import io.reactivex.Observer;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.internal.operators.flowable.FlowableObserveOnTest.DisposeTrackingScheduler;
+import io.reactivex.internal.operators.observable.ObservableObserveOn.ObserveOnObserver;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.observers.*;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.*;
+import io.reactivex.subjects.*;
 
 public class ObservableObserveOnTest {
 
@@ -55,13 +65,13 @@ public class ObservableObserveOnTest {
         Observer<String> observer = TestHelper.mockObserver();
 
         InOrder inOrder = inOrder(observer);
-        TestObserver<String> ts = new TestObserver<String>(observer);
+        TestObserver<String> to = new TestObserver<String>(observer);
 
-        obs.observeOn(Schedulers.computation()).subscribe(ts);
+        obs.observeOn(Schedulers.computation()).subscribe(to);
 
-        ts.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
-        if (ts.errors().size() > 0) {
-            for (Throwable t : ts.errors()) {
+        to.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
+        if (to.errors().size() > 0) {
+            for (Throwable t : to.errors()) {
                 t.printStackTrace();
             }
             fail("failed with exception");
@@ -136,10 +146,8 @@ public class ObservableObserveOnTest {
         Observable<Integer> o = Observable.just(1, 2, 3);
         Observable<Integer> o2 = o.observeOn(scheduler);
 
-        @SuppressWarnings("unchecked")
-        DefaultObserver<Object> observer1 = mock(DefaultObserver.class);
-        @SuppressWarnings("unchecked")
-        DefaultObserver<Object> observer2 = mock(DefaultObserver.class);
+        Observer<Object> observer1 = TestHelper.mockObserver();
+        Observer<Object> observer2 = TestHelper.mockObserver();
 
         InOrder inOrder1 = inOrder(observer1);
         InOrder inOrder2 = inOrder(observer2);
@@ -359,8 +367,7 @@ public class ObservableObserveOnTest {
 
         Observable<Integer> source = Observable.concat(Observable.<Integer> error(new TestException()), Observable.just(1));
 
-        @SuppressWarnings("unchecked")
-        DefaultObserver<Integer> o = mock(DefaultObserver.class);
+        Observer<Integer> o = TestHelper.mockObserver();
         InOrder inOrder = inOrder(o);
 
         source.observeOn(testScheduler).subscribe(o);
@@ -379,13 +386,13 @@ public class ObservableObserveOnTest {
         final TestScheduler testScheduler = new TestScheduler();
 
         final Observer<Integer> observer = TestHelper.mockObserver();
-        TestObserver<Integer> ts = new TestObserver<Integer>(observer);
+        TestObserver<Integer> to = new TestObserver<Integer>(observer);
 
         Observable.just(1, 2, 3)
                 .observeOn(testScheduler)
-                .subscribe(ts);
+                .subscribe(to);
 
-        ts.dispose();
+        to.dispose();
         testScheduler.advanceTimeBy(1, TimeUnit.SECONDS);
 
         final InOrder inOrder = inOrder(observer);
@@ -420,23 +427,23 @@ public class ObservableObserveOnTest {
             }
         });
 
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
         o
                 .take(7)
                 .observeOn(Schedulers.newThread())
-                .subscribe(ts);
+                .subscribe(to);
 
-        ts.awaitTerminalEvent();
-        ts.assertValues(0, 1, 2, 3, 4, 5, 6);
+        to.awaitTerminalEvent();
+        to.assertValues(0, 1, 2, 3, 4, 5, 6);
         assertEquals(7, generated.get());
     }
 
     @Test
     public void testAsyncChild() {
-        TestObserver<Integer> ts = new TestObserver<Integer>();
-        Observable.range(0, 100000).observeOn(Schedulers.newThread()).observeOn(Schedulers.newThread()).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+        TestObserver<Integer> to = new TestObserver<Integer>();
+        Observable.range(0, 100000).observeOn(Schedulers.newThread()).observeOn(Schedulers.newThread()).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
     }
 
     @Test
@@ -455,4 +462,356 @@ public class ObservableObserveOnTest {
         .awaitDone(5, TimeUnit.SECONDS)
         .assertFailure(TestException.class, 1, 2, 3, 4, 5);
     }
+
+    @Test
+    public void trampolineScheduler() {
+        Observable.just(1)
+        .observeOn(Schedulers.trampoline())
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishSubject.create().observeOn(new TestScheduler()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.observeOn(new TestScheduler());
+            }
+        });
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            TestScheduler scheduler = new TestScheduler();
+            TestObserver<Integer> to = new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onComplete();
+                    observer.onNext(1);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .observeOn(scheduler)
+            .test();
+
+            scheduler.triggerActions();
+
+            to.assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void inputSyncFused() {
+        Observable.range(1, 5)
+        .observeOn(Schedulers.single())
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void inputAsyncFused() {
+        UnicastSubject<Integer> us = UnicastSubject.create();
+
+        TestObserver<Integer> to = us.observeOn(Schedulers.single()).test();
+
+        TestHelper.emit(us, 1, 2, 3, 4, 5);
+
+        to
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void inputAsyncFusedError() {
+        UnicastSubject<Integer> us = UnicastSubject.create();
+
+        TestObserver<Integer> to = us.observeOn(Schedulers.single()).test();
+
+        us.onError(new TestException());
+
+        to
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void inputAsyncFusedErrorDelayed() {
+        UnicastSubject<Integer> us = UnicastSubject.create();
+
+        TestObserver<Integer> to = us.observeOn(Schedulers.single(), true).test();
+
+        us.onError(new TestException());
+
+        to
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void outputFused() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ANY);
+
+        Observable.range(1, 5).hide()
+        .observeOn(Schedulers.single())
+        .subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.ASYNC)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void outputFusedReject() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.SYNC);
+
+        Observable.range(1, 5).hide()
+        .observeOn(Schedulers.single())
+        .subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.NONE)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void inputOutputAsyncFusedError() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ANY);
+
+        UnicastSubject<Integer> us = UnicastSubject.create();
+
+        us.observeOn(Schedulers.single())
+        .subscribe(to);
+
+        us.onError(new TestException());
+
+        to
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.ASYNC)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void inputOutputAsyncFusedErrorDelayed() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ANY);
+
+        UnicastSubject<Integer> us = UnicastSubject.create();
+
+        us.observeOn(Schedulers.single(), true)
+        .subscribe(to);
+
+        us.onError(new TestException());
+
+        to
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.ASYNC)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void outputFusedCancelReentrant() throws Exception {
+        final UnicastSubject<Integer> us = UnicastSubject.create();
+
+        final CountDownLatch cdl = new CountDownLatch(1);
+
+        us.observeOn(Schedulers.single())
+        .subscribe(new Observer<Integer>() {
+            Disposable upstream;
+            int count;
+            @Override
+            public void onSubscribe(Disposable d) {
+                this.upstream = d;
+                ((QueueDisposable<?>)d).requestFusion(QueueFuseable.ANY);
+            }
+
+            @Override
+            public void onNext(Integer value) {
+                if (++count == 1) {
+                    us.onNext(2);
+                    upstream.dispose();
+                    cdl.countDown();
+                }
+            }
+
+            @Override
+            public void onError(Throwable e) {
+
+            }
+
+            @Override
+            public void onComplete() {
+
+            }
+        });
+
+        us.onNext(1);
+
+        cdl.await();
+    }
+
+    @Test
+    public void nonFusedPollThrows() {
+        new Observable<Integer>() {
+            @Override
+            protected void subscribeActual(Observer<? super Integer> observer) {
+                observer.onSubscribe(Disposables.empty());
+
+                @SuppressWarnings("unchecked")
+                ObserveOnObserver<Integer> oo = (ObserveOnObserver<Integer>)observer;
+
+                oo.queue = new SimpleQueue<Integer>() {
+
+                    @Override
+                    public boolean offer(Integer value) {
+                        return false;
+                    }
+
+                    @Override
+                    public boolean offer(Integer v1, Integer v2) {
+                        return false;
+                    }
+
+                    @Nullable
+                    @Override
+                    public Integer poll() throws Exception {
+                        throw new TestException();
+                    }
+
+                    @Override
+                    public boolean isEmpty() {
+                        return false;
+                    }
+
+                    @Override
+                    public void clear() {
+                    }
+                };
+
+                oo.clear();
+
+                oo.schedule();
+            }
+        }
+        .observeOn(Schedulers.single())
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void outputFusedOneSignal() {
+        final BehaviorSubject<Integer> bs = BehaviorSubject.createDefault(1);
+
+        bs.observeOn(ImmediateThinScheduler.INSTANCE)
+        .concatMap(new Function<Integer, ObservableSource<Integer>>() {
+            @Override
+            public ObservableSource<Integer> apply(Integer v)
+                    throws Exception {
+                return Observable.just(v + 1);
+            }
+        })
+        .subscribeWith(new TestObserver<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 2) {
+                    bs.onNext(2);
+                }
+            }
+        })
+        .assertValuesOnly(2, 3);
+    }
+
+    @Test
+    public void workerNotDisposedPrematurelyNormalInNormalOut() {
+        DisposeTrackingScheduler s = new DisposeTrackingScheduler();
+
+        Observable.concat(
+                Observable.just(1).hide().observeOn(s),
+                Observable.just(2)
+        )
+        .test()
+        .assertResult(1, 2);
+
+        assertEquals(1, s.disposedCount.get());
+    }
+
+    @Test
+    public void workerNotDisposedPrematurelySyncInNormalOut() {
+        DisposeTrackingScheduler s = new DisposeTrackingScheduler();
+
+        Observable.concat(
+                Observable.just(1).observeOn(s),
+                Observable.just(2)
+        )
+        .test()
+        .assertResult(1, 2);
+
+        assertEquals(1, s.disposedCount.get());
+    }
+
+    @Test
+    public void workerNotDisposedPrematurelyAsyncInNormalOut() {
+        DisposeTrackingScheduler s = new DisposeTrackingScheduler();
+
+        UnicastSubject<Integer> up = UnicastSubject.create();
+        up.onNext(1);
+        up.onComplete();
+
+        Observable.concat(
+                up.observeOn(s),
+                Observable.just(2)
+        )
+        .test()
+        .assertResult(1, 2);
+
+        assertEquals(1, s.disposedCount.get());
+    }
+
+    static final class TestObserverFusedCanceling
+            extends TestObserver<Integer> {
+
+        TestObserverFusedCanceling() {
+            super();
+            initialFusionMode = QueueFuseable.ANY;
+        }
+
+        @Override
+        public void onComplete() {
+            cancel();
+            super.onComplete();
+        }
+    }
+
+    @Test
+    public void workerNotDisposedPrematurelyNormalInAsyncOut() {
+        DisposeTrackingScheduler s = new DisposeTrackingScheduler();
+
+        TestObserver<Integer> to = new TestObserverFusedCanceling();
+
+        Observable.just(1).hide().observeOn(s).subscribe(to);
+
+        assertEquals(1, s.disposedCount.get());
+    }
+
 }

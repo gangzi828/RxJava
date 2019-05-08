@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,7 +17,9 @@ import java.util.concurrent.*;
 
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.util.ExceptionHelper;
+import io.reactivex.internal.util.*;
+
+import static io.reactivex.internal.util.ExceptionHelper.timeoutMessage;
 
 /**
  * A combined Observer that awaits the success or error signal via a CountDownLatch.
@@ -30,7 +32,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     T value;
     Throwable error;
 
-    Disposable d;
+    Disposable upstream;
 
     volatile boolean cancelled;
 
@@ -40,7 +42,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
 
     void dispose() {
         cancelled = true;
-        Disposable d = this.d;
+        Disposable d = this.upstream;
         if (d != null) {
             d.dispose();
         }
@@ -48,7 +50,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
 
     @Override
     public void onSubscribe(Disposable d) {
-        this.d = d;
+        this.upstream = d;
         if (cancelled) {
             d.dispose();
         }
@@ -79,6 +81,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     public T blockingGet() {
         if (getCount() != 0) {
             try {
+                BlockingHelper.verifyNonBlocking();
                 await();
             } catch (InterruptedException ex) {
                 dispose();
@@ -101,6 +104,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     public T blockingGet(T defaultValue) {
         if (getCount() != 0) {
             try {
+                BlockingHelper.verifyNonBlocking();
                 await();
             } catch (InterruptedException ex) {
                 dispose();
@@ -123,6 +127,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     public Throwable blockingGetError() {
         if (getCount() != 0) {
             try {
+                BlockingHelper.verifyNonBlocking();
                 await();
             } catch (InterruptedException ex) {
                 dispose();
@@ -142,9 +147,10 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     public Throwable blockingGetError(long timeout, TimeUnit unit) {
         if (getCount() != 0) {
             try {
+                BlockingHelper.verifyNonBlocking();
                 if (!await(timeout, unit)) {
                     dispose();
-                    throw ExceptionHelper.wrapOrThrow(new TimeoutException());
+                    throw ExceptionHelper.wrapOrThrow(new TimeoutException(timeoutMessage(timeout, unit)));
                 }
             } catch (InterruptedException ex) {
                 dispose();
@@ -164,6 +170,7 @@ implements SingleObserver<T>, CompletableObserver, MaybeObserver<T> {
     public boolean blockingAwait(long timeout, TimeUnit unit) {
         if (getCount() != 0) {
             try {
+                BlockingHelper.verifyNonBlocking();
                 if (!await(timeout, unit)) {
                     dispose();
                     return false;

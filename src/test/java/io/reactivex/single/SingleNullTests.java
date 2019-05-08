@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,7 +12,6 @@
  */
 
 package io.reactivex.single;
-
 
 import java.lang.reflect.*;
 import java.util.*;
@@ -532,13 +531,26 @@ public class SingleNullTests {
 
     @SuppressWarnings("unchecked")
     @Test(expected = NullPointerException.class)
+    public void zipIterableTwoIsNull() {
+        Single.zip(Arrays.asList(just1, null), new Function<Object[], Object>() {
+            @Override
+            public Object apply(Object[] v) {
+                return 1;
+            }
+        })
+        .blockingGet();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test(expected = NullPointerException.class)
     public void zipArrayOneIsNull() {
         Single.zipArray(new Function<Object[], Object>() {
             @Override
             public Object apply(Object[] v) {
                 return 1;
             }
-        }, just1, null);
+        }, just1, null)
+        .blockingGet();
     }
 
     @SuppressWarnings("unchecked")
@@ -651,7 +663,7 @@ public class SingleNullTests {
     public void liftFunctionReturnsNull() {
         just1.lift(new SingleOperator<Object, Integer>() {
             @Override
-            public SingleObserver<? super Integer> apply(SingleObserver<? super Object> s) {
+            public SingleObserver<? super Integer> apply(SingleObserver<? super Object> observer) {
                 return null;
             }
         }).blockingGet();
@@ -796,6 +808,7 @@ public class SingleNullTests {
             public void accept(Integer v) { }
         }, null);
     }
+
     @Test(expected = NullPointerException.class)
     public void subscribeSubscriberNull() {
         just1.toFlowable().subscribe((Subscriber<Integer>)null);
@@ -829,6 +842,11 @@ public class SingleNullTests {
     @Test(expected = NullPointerException.class)
     public void toNull() {
         just1.to(null);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void asNull() {
+        just1.as(null);
     }
 
     @Test(expected = NullPointerException.class)

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -21,7 +21,6 @@ import org.junit.Test;
 
 import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
-import io.reactivex.observers.DefaultObserver;
 
 @SuppressWarnings("unchecked")
 public class ObservableDeferTest {
@@ -69,7 +68,7 @@ public class ObservableDeferTest {
 
         Observable<String> result = Observable.defer(factory);
 
-        DefaultObserver<String> o = mock(DefaultObserver.class);
+        Observer<String> o = TestHelper.mockObserver();
 
         result.subscribe(o);
 

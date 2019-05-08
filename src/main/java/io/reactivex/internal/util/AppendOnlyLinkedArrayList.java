@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -66,13 +66,22 @@ public class AppendOnlyLinkedArrayList<T> {
     }
 
     /**
+     * Predicate interface suppressing the exception.
+     *
+     * @param <T> the value type
+     */
+    public interface NonThrowingPredicate<T> extends Predicate<T> {
+        @Override
+        boolean test(T t);
+    }
+
+    /**
      * Loops over all elements of the array until a null element is encountered or
      * the given predicate returns true.
      * @param consumer the consumer of values that returns true if the forEach should terminate
-     * @throws Exception if the predicate throws
      */
     @SuppressWarnings("unchecked")
-    public void forEachWhile(Predicate<? super T> consumer) throws Exception {
+    public void forEachWhile(NonThrowingPredicate<? super T> consumer) {
         Object[] a = head;
         final int c = capacity;
         while (a != null) {
@@ -82,7 +91,7 @@ public class AppendOnlyLinkedArrayList<T> {
                     break;
                 }
                 if (consumer.test((T)o)) {
-                    break;
+                    return;
                 }
             }
             a = (Object[])a[c];
@@ -107,21 +116,14 @@ public class AppendOnlyLinkedArrayList<T> {
                     break;
                 }
 
-                if (NotificationLite.isComplete(o)) {
-                    subscriber.onComplete();
-                    return true;
-                } else
-                if (NotificationLite.isError(o)) {
-                    subscriber.onError(NotificationLite.getError(o));
+                if (NotificationLite.acceptFull(o, subscriber)) {
                     return true;
                 }
-                subscriber.onNext(NotificationLite.<U>getValue(o));
             }
             a = (Object[])a[c];
         }
         return false;
     }
-
 
     /**
      * Interprets the contents as NotificationLite objects and calls
@@ -141,15 +143,9 @@ public class AppendOnlyLinkedArrayList<T> {
                     break;
                 }
 
-                if (NotificationLite.isComplete(o)) {
-                    observer.onComplete();
-                    return true;
-                } else
-                if (NotificationLite.isError(o)) {
-                    observer.onError(NotificationLite.getError(o));
+                if (NotificationLite.acceptFull(o, observer)) {
                     return true;
                 }
-                observer.onNext(NotificationLite.<U>getValue(o));
             }
             a = (Object[])a[c];
         }

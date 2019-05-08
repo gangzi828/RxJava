@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -30,14 +30,14 @@ public final class SingleLift<T, R> extends Single<R> {
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super R> s) {
+    protected void subscribeActual(SingleObserver<? super R> observer) {
         SingleObserver<? super T> sr;
 
         try {
-            sr = ObjectHelper.requireNonNull(onLift.apply(s), "The onLift returned a null SingleObserver");
+            sr = ObjectHelper.requireNonNull(onLift.apply(observer), "The onLift returned a null SingleObserver");
         } catch (Throwable ex) {
             Exceptions.throwIfFatal(ex);
-            EmptyDisposable.error(ex, s);
+            EmptyDisposable.error(ex, observer);
             return;
         }
 

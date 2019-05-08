@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,8 +17,11 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
-import io.reactivex.exceptions.Exceptions;
+import io.reactivex.*;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.queue.SpscArrayQueue;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.*;
@@ -29,7 +32,7 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
     final int bufferSize;
     final boolean delayErrors;
 
-    public FlowableSwitchMap(Publisher<T> source,
+    public FlowableSwitchMap(Flowable<T> source,
             Function<? super T, ? extends Publisher<? extends R>> mapper, int bufferSize,
                     boolean delayErrors) {
         super(source);
@@ -46,21 +49,20 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
         source.subscribe(new SwitchMapSubscriber<T, R>(s, mapper, bufferSize, delayErrors));
     }
 
-    static final class SwitchMapSubscriber<T, R> extends AtomicInteger implements Subscriber<T>, Subscription {
+    static final class SwitchMapSubscriber<T, R> extends AtomicInteger implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -3491074160481096299L;
-        final Subscriber<? super R> actual;
+        final Subscriber<? super R> downstream;
         final Function<? super T, ? extends Publisher<? extends R>> mapper;
         final int bufferSize;
         final boolean delayErrors;
-
 
         volatile boolean done;
         final AtomicThrowable error;
 
         volatile boolean cancelled;
 
-        Subscription s;
+        Subscription upstream;
 
         final AtomicReference<SwitchMapInnerSubscriber<T, R>> active = new AtomicReference<SwitchMapInnerSubscriber<T, R>>();
 
@@ -77,7 +79,7 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
         SwitchMapSubscriber(Subscriber<? super R> actual,
                 Function<? super T, ? extends Publisher<? extends R>> mapper, int bufferSize,
                         boolean delayErrors) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
             this.bufferSize = bufferSize;
             this.delayErrors = delayErrors;
@@ -86,14 +88,18 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T t) {
+            if (done) {
+                return;
+            }
+
             long c = unique + 1;
             unique = c;
 
@@ -104,17 +110,11 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
 
             Publisher<? extends R> p;
             try {
-                p = mapper.apply(t);
+                p = ObjectHelper.requireNonNull(mapper.apply(t), "The publisher returned is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
+                upstream.cancel();
                 onError(e);
-                return;
-            }
-
-            if (p == null) {
-                s.cancel();
-                onError(new NullPointerException("The publisher returned is null"));
                 return;
             }
 
@@ -134,11 +134,7 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
 
         @Override
         public void onError(Throwable t) {
-            if (done) {
-                RxJavaPlugins.onError(t);
-                return;
-            }
-            if (error.addThrowable(t)) {
+            if (!done && error.addThrowable(t)) {
                 if (!delayErrors) {
                     disposeInner();
                 }
@@ -160,14 +156,13 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
 
         @Override
         public void request(long n) {
-            if (!SubscriptionHelper.validate(n)) {
-                return;
-            }
-            BackpressureHelper.add(requested, n);
-            if (unique == 0L) {
-                s.request(Long.MAX_VALUE);
-            } else {
-                drain();
+            if (SubscriptionHelper.validate(n)) {
+                BackpressureHelper.add(requested, n);
+                if (unique == 0L) {
+                    upstream.request(Long.MAX_VALUE);
+                } else {
+                    drain();
+                }
             }
         }
 
@@ -175,7 +170,7 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
         public void cancel() {
             if (!cancelled) {
                 cancelled = true;
-                s.cancel();
+                upstream.cancel();
 
                 disposeInner();
             }
@@ -197,13 +192,14 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                 return;
             }
 
-            final Subscriber<? super R> a = actual;
+            final Subscriber<? super R> a = downstream;
 
             int missing = 1;
 
             for (;;) {
 
                 if (cancelled) {
+                    active.lazySet(null);
                     return;
                 }
 
@@ -222,7 +218,6 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                         Throwable err = error.get();
                         if (err != null) {
                             disposeInner();
-                            s.cancel();
                             a.onError(error.terminate());
                             return;
                         } else
@@ -234,15 +229,12 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                 }
 
                 SwitchMapInnerSubscriber<T, R> inner = active.get();
-
-                if (inner != null) {
-                    SpscArrayQueue<R> q = inner.queue;
-
+                SimpleQueue<R> q = inner != null ? inner.queue : null;
+                if (q != null) {
                     if (inner.done) {
                         if (!delayErrors) {
                             Throwable err = error.get();
                             if (err != null) {
-                                s.cancel();
                                 disposeInner();
                                 a.onError(error.terminate());
                                 return;
@@ -269,7 +261,17 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                         }
 
                         boolean d = inner.done;
-                        R v = q.poll();
+                        R v;
+
+                        try {
+                            v = q.poll();
+                        } catch (Throwable ex) {
+                            Exceptions.throwIfFatal(ex);
+                            inner.cancel();
+                            error.addThrowable(ex);
+                            d = true;
+                            v = null;
+                        }
                         boolean empty = v == null;
 
                         if (inner != active.get()) {
@@ -281,7 +283,6 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                             if (!delayErrors) {
                                 Throwable err = error.get();
                                 if (err != null) {
-                                    s.cancel();
                                     a.onError(error.terminate());
                                     return;
                                 } else
@@ -328,74 +329,78 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
                 }
             }
         }
-
-        boolean checkTerminated(boolean d, boolean empty, Subscriber<? super R> a) {
-            if (cancelled) {
-                s.cancel();
-                return true;
-            }
-            if (d) {
-                Throwable e = error.get();
-                if (e != null) {
-                    cancelled = true;
-                    s.cancel();
-                    a.onError(error.terminate());
-                    return true;
-                } else
-                if (empty) {
-                    a.onComplete();
-                    return true;
-                }
-            }
-
-            return false;
-        }
     }
 
-    static final class SwitchMapInnerSubscriber<T, R> extends AtomicReference<Subscription> implements Subscriber<R> {
+    static final class SwitchMapInnerSubscriber<T, R>
+    extends AtomicReference<Subscription> implements FlowableSubscriber<R> {
 
         private static final long serialVersionUID = 3837284832786408377L;
         final SwitchMapSubscriber<T, R> parent;
         final long index;
         final int bufferSize;
-        final SpscArrayQueue<R> queue;
+
+        volatile SimpleQueue<R> queue;
 
         volatile boolean done;
+
+        int fusionMode;
 
         SwitchMapInnerSubscriber(SwitchMapSubscriber<T, R> parent, long index, int bufferSize) {
             this.parent = parent;
             this.index = index;
             this.bufferSize = bufferSize;
-            this.queue = new SpscArrayQueue<R>(bufferSize);
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (index == parent.unique) {
-                if (SubscriptionHelper.setOnce(this, s)) {
-                    s.request(bufferSize);
+            if (SubscriptionHelper.setOnce(this, s)) {
+                if (s instanceof QueueSubscription) {
+                    @SuppressWarnings("unchecked")
+                    QueueSubscription<R> qs = (QueueSubscription<R>) s;
+
+                    int m = qs.requestFusion(QueueSubscription.ANY | QueueSubscription.BOUNDARY);
+                    if (m == QueueSubscription.SYNC) {
+                        fusionMode = m;
+                        queue = qs;
+                        done = true;
+                        parent.drain();
+                        return;
+                    }
+                    if (m == QueueSubscription.ASYNC) {
+                        fusionMode = m;
+                        queue = qs;
+                        s.request(bufferSize);
+                        return;
+                    }
                 }
-            } else {
-                s.cancel();
+
+                queue = new SpscArrayQueue<R>(bufferSize);
+
+                s.request(bufferSize);
             }
         }
 
         @Override
         public void onNext(R t) {
-            if (index == parent.unique) {
-                if (!queue.offer(t)) {
-                    onError(new IllegalStateException("Queue full?!"));
+            SwitchMapSubscriber<T, R> p = parent;
+            if (index == p.unique) {
+                if (fusionMode == QueueSubscription.NONE && !queue.offer(t)) {
+                    onError(new MissingBackpressureException("Queue full?!"));
                     return;
                 }
-                parent.drain();
+                p.drain();
             }
         }
 
         @Override
         public void onError(Throwable t) {
-            if (index == parent.unique && parent.error.addThrowable(t)) {
+            SwitchMapSubscriber<T, R> p = parent;
+            if (index == p.unique && p.error.addThrowable(t)) {
+                if (!p.delayErrors) {
+                    p.upstream.cancel();
+                }
                 done = true;
-                parent.drain();
+                p.drain();
             } else {
                 RxJavaPlugins.onError(t);
             }
@@ -403,9 +408,10 @@ public final class FlowableSwitchMap<T, R> extends AbstractFlowableWithUpstream<
 
         @Override
         public void onComplete() {
-            if (index == parent.unique) {
+            SwitchMapSubscriber<T, R> p = parent;
+            if (index == p.unique) {
                 done = true;
-                parent.drain();
+                p.drain();
             }
         }
 

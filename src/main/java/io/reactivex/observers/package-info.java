@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,10 @@
  */
 
 /**
- * Default wrappers and implementations for Observer-based consumer classes and interfaces;
- * utility classes for creating them from callbacks.
+ * Default wrappers and implementations for Observer-based consumer classes and interfaces,
+ * including disposable and resource-tracking variants and
+ * the {@link io.reactivex.observers.TestObserver} that allows unit testing
+ * {@link io.reactivex.Observable}-, {@link io.reactivex.Single}-, {@link io.reactivex.Maybe}-
+ * and {@link io.reactivex.Completable}-based flows.
  */
 package io.reactivex.observers;

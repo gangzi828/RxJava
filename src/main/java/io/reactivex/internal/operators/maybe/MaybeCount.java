@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -42,50 +42,50 @@ public final class MaybeCount<T> extends Single<Long> implements HasUpstreamMayb
     }
 
     static final class CountMaybeObserver implements MaybeObserver<Object>, Disposable {
-        final SingleObserver<? super Long> actual;
+        final SingleObserver<? super Long> downstream;
 
-        Disposable d;
+        Disposable upstream;
 
-        CountMaybeObserver(SingleObserver<? super Long> actual) {
-            this.actual = actual;
+        CountMaybeObserver(SingleObserver<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onSuccess(Object value) {
-            d = DisposableHelper.DISPOSED;
-            actual.onSuccess(1L);
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onSuccess(1L);
         }
 
         @Override
         public void onError(Throwable e) {
-            d = DisposableHelper.DISPOSED;
-            actual.onError(e);
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            d = DisposableHelper.DISPOSED;
-            actual.onSuccess(0L);
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onSuccess(0L);
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
         public void dispose() {
-            d.dispose();
-            d = DisposableHelper.DISPOSED;
+            upstream.dispose();
+            upstream = DisposableHelper.DISPOSED;
         }
     }
 }

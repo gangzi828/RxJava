@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,7 +24,6 @@ import io.reactivex.TestHelper;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Cancellable;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
 
 public class CancellableDisposableTest {
 
@@ -72,7 +71,7 @@ public class CancellableDisposableTest {
             cd.dispose();
             cd.dispose();
 
-            TestHelper.assertError(list, 0, TestException.class);
+            TestHelper.assertUndeliverable(list, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -84,7 +83,7 @@ public class CancellableDisposableTest {
     @Test
     public void disposeRace() {
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final AtomicInteger count = new AtomicInteger();
 
             Cancellable c = new Cancellable() {
@@ -103,7 +102,7 @@ public class CancellableDisposableTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
 
             assertEquals(1, count.get());
         }

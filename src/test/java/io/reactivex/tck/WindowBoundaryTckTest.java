@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,11 +28,11 @@ public class WindowBoundaryTckTest extends BaseTck<List<Long>> {
     @SuppressWarnings({ "rawtypes", "unchecked" })
     @Override
     public Publisher<List<Long>> createPublisher(long elements) {
-        return FlowableTck.wrap(
+        return
             Flowable.fromIterable(iterate(elements))
             .window(Flowable.just(1).concatWith(Flowable.<Integer>never()))
             .onBackpressureBuffer()
             .flatMap((Function)Functions.identity())
-        );
+        ;
     }
 }

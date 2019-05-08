@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -99,28 +99,27 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
     extends AtomicReference<Object>
     implements MaybeObserver<T>, Disposable {
 
-
         private static final long serialVersionUID = -674404550052917487L;
 
-        final MaybeObserver<? super T> actual;
+        final MaybeObserver<? super T> downstream;
 
         final Consumer<? super D> disposer;
 
         final boolean eager;
 
-        Disposable d;
+        Disposable upstream;
 
         UsingObserver(MaybeObserver<? super T> actual, D resource, Consumer<? super D> disposer, boolean eager) {
             super(resource);
-            this.actual = actual;
+            this.downstream = actual;
             this.disposer = disposer;
             this.eager = eager;
         }
 
         @Override
         public void dispose() {
-            d.dispose();
-            d = DisposableHelper.DISPOSED;
+            upstream.dispose();
+            upstream = DisposableHelper.DISPOSED;
             disposeResourceAfter();
         }
 
@@ -139,22 +138,22 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @SuppressWarnings("unchecked")
         @Override
         public void onSuccess(T value) {
-            d = DisposableHelper.DISPOSED;
+            upstream = DisposableHelper.DISPOSED;
             if (eager) {
                 Object resource = getAndSet(this);
                 if (resource != this) {
@@ -162,7 +161,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
                         disposer.accept((D)resource);
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        actual.onError(ex);
+                        downstream.onError(ex);
                         return;
                     }
                 } else {
@@ -170,7 +169,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
                 }
             }
 
-            actual.onSuccess(value);
+            downstream.onSuccess(value);
 
             if (!eager) {
                 disposeResourceAfter();
@@ -180,7 +179,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
         @SuppressWarnings("unchecked")
         @Override
         public void onError(Throwable e) {
-            d = DisposableHelper.DISPOSED;
+            upstream = DisposableHelper.DISPOSED;
             if (eager) {
                 Object resource = getAndSet(this);
                 if (resource != this) {
@@ -195,7 +194,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
                 }
             }
 
-            actual.onError(e);
+            downstream.onError(e);
 
             if (!eager) {
                 disposeResourceAfter();
@@ -205,7 +204,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
         @SuppressWarnings("unchecked")
         @Override
         public void onComplete() {
-            d = DisposableHelper.DISPOSED;
+            upstream = DisposableHelper.DISPOSED;
             if (eager) {
                 Object resource = getAndSet(this);
                 if (resource != this) {
@@ -213,7 +212,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
                         disposer.accept((D)resource);
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        actual.onError(ex);
+                        downstream.onError(ex);
                         return;
                     }
                 } else {
@@ -221,7 +220,7 @@ public final class MaybeUsing<T, D> extends Maybe<T> {
                 }
             }
 
-            actual.onComplete();
+            downstream.onComplete();
 
             if (!eager) {
                 disposeResourceAfter();

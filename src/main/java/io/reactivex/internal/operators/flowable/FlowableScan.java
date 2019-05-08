@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,13 +15,16 @@ package io.reactivex.internal.operators.flowable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableScan<T> extends AbstractFlowableWithUpstream<T, T> {
     final BiFunction<T, T, T> accumulator;
-    public FlowableScan(Publisher<T> source, BiFunction<T, T, T> accumulator) {
+    public FlowableScan(Flowable<T> source, BiFunction<T, T, T> accumulator) {
         super(source);
         this.accumulator = accumulator;
     }
@@ -31,30 +34,35 @@ public final class FlowableScan<T> extends AbstractFlowableWithUpstream<T, T> {
         source.subscribe(new ScanSubscriber<T>(s, accumulator));
     }
 
-    static final class ScanSubscriber<T> implements Subscriber<T>, Subscription {
-        final Subscriber<? super T> actual;
+    static final class ScanSubscriber<T> implements FlowableSubscriber<T>, Subscription {
+        final Subscriber<? super T> downstream;
         final BiFunction<T, T, T> accumulator;
 
-        Subscription s;
+        Subscription upstream;
 
         T value;
 
+        boolean done;
+
         ScanSubscriber(Subscriber<? super T> actual, BiFunction<T, T, T> accumulator) {
-            this.actual = actual;
+            this.downstream = actual;
             this.accumulator = accumulator;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T t) {
-            final Subscriber<? super T> a = actual;
+            if (done) {
+                return;
+            }
+            final Subscriber<? super T> a = downstream;
             T v = value;
             if (v == null) {
                 value = t;
@@ -63,17 +71,11 @@ public final class FlowableScan<T> extends AbstractFlowableWithUpstream<T, T> {
                 T u;
 
                 try {
-                    u = accumulator.apply(v, t);
+                    u = ObjectHelper.requireNonNull(accumulator.apply(v, t), "The value returned by the accumulator is null");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
-                    s.cancel();
-                    a.onError(e);
-                    return;
-                }
-
-                if (u == null) {
-                    s.cancel();
-                    a.onError(new NullPointerException("The value returned by the accumulator is null"));
+                    upstream.cancel();
+                    onError(e);
                     return;
                 }
 
@@ -84,22 +86,31 @@ public final class FlowableScan<T> extends AbstractFlowableWithUpstream<T, T> {
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            if (done) {
+                RxJavaPlugins.onError(t);
+                return;
+            }
+            done = true;
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            if (done) {
+                return;
+            }
+            done = true;
+            downstream.onComplete();
         }
 
         @Override
         public void request(long n) {
-            s.request(n);
+            upstream.request(n);
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

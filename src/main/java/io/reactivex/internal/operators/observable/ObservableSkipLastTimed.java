@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -46,14 +46,14 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
     static final class SkipLastTimedObserver<T> extends AtomicInteger implements Observer<T>, Disposable {
 
         private static final long serialVersionUID = -5677354903406201275L;
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final long time;
         final TimeUnit unit;
         final Scheduler scheduler;
         final SpscLinkedArrayQueue<Object> queue;
         final boolean delayError;
 
-        Disposable s;
+        Disposable upstream;
 
         volatile boolean cancelled;
 
@@ -61,7 +61,7 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
         Throwable error;
 
         SkipLastTimedObserver(Observer<? super T> actual, long time, TimeUnit unit, Scheduler scheduler, int bufferSize, boolean delayError) {
-            this.actual = actual;
+            this.downstream = actual;
             this.time = time;
             this.unit = unit;
             this.scheduler = scheduler;
@@ -70,10 +70,10 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
@@ -103,12 +103,12 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
 
         @Override
         public void dispose() {
-            if (cancelled) {
+            if (!cancelled) {
                 cancelled = true;
+                upstream.dispose();
 
                 if (getAndIncrement() == 0) {
                     queue.clear();
-                    s.dispose();
                 }
             }
         }
@@ -125,7 +125,7 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
 
             int missed = 1;
 
-            final Observer<? super T> a = actual;
+            final Observer<? super T> a = downstream;
             final SpscLinkedArrayQueue<Object> q = queue;
             final boolean delayError = this.delayError;
             final TimeUnit unit = this.unit;
@@ -134,11 +134,12 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
 
             for (;;) {
 
-                if (checkTerminated(done, q.isEmpty(), a, delayError)) {
-                    return;
-                }
-
                 for (;;) {
+                    if (cancelled) {
+                        queue.clear();
+                        return;
+                    }
+
                     boolean d = done;
 
                     Long ts = (Long)q.peek();
@@ -151,16 +152,32 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
                         empty = true;
                     }
 
-                    if (checkTerminated(d, empty, a, delayError)) {
-                        return;
+                    if (d) {
+                        if (delayError) {
+                            if (empty) {
+                                Throwable e = error;
+                                if (e != null) {
+                                    a.onError(e);
+                                } else {
+                                    a.onComplete();
+                                }
+                                return;
+                            }
+                        } else {
+                            Throwable e = error;
+                            if (e != null) {
+                                queue.clear();
+                                a.onError(e);
+                                return;
+                            } else
+                            if (empty) {
+                                a.onComplete();
+                                return;
+                            }
+                        }
                     }
 
                     if (empty) {
-                        break;
-                    }
-
-                    if (ts > now - time) {
-                        // not old enough
                         break;
                     }
 
@@ -176,39 +193,6 @@ public final class ObservableSkipLastTimed<T> extends AbstractObservableWithUpst
                     break;
                 }
             }
-        }
-
-        boolean checkTerminated(boolean d, boolean empty, Observer<? super T> a, boolean delayError) {
-            if (cancelled) {
-                queue.clear();
-                s.dispose();
-                return true;
-            }
-            if (d) {
-                if (delayError) {
-                    if (empty) {
-                        Throwable e = error;
-                        if (e != null) {
-                            a.onError(e);
-                        } else {
-                            a.onComplete();
-                        }
-                        return true;
-                    }
-                } else {
-                    Throwable e = error;
-                    if (e != null) {
-                        queue.clear();
-                        a.onError(e);
-                        return true;
-                    } else
-                    if (empty) {
-                        a.onComplete();
-                        return true;
-                    }
-                }
-            }
-            return false;
         }
     }
 }

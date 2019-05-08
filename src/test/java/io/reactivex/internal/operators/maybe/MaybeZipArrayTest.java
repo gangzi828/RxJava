@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,10 +22,10 @@ import org.junit.Test;
 import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.PublishProcessor;
-import io.reactivex.schedulers.Schedulers;
 
 public class MaybeZipArrayTest {
 
@@ -35,7 +35,6 @@ public class MaybeZipArrayTest {
             return "" + a + b;
         }
     };
-
 
     final Function3<Object, Object, Object, Object> addString3 = new Function3<Object, Object, Object, Object>() {
         @Override
@@ -113,7 +112,7 @@ public class MaybeZipArrayTest {
 
     @Test
     public void innerErrorRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             List<Throwable> errors = TestHelper.trackPluginErrors();
             try {
                 final PublishProcessor<Integer> pp0 = PublishProcessor.create();
@@ -138,16 +137,36 @@ public class MaybeZipArrayTest {
                     }
                 };
 
-                TestHelper.race(r1, r2, Schedulers.single());
+                TestHelper.race(r1, r2);
 
                 to.assertFailure(TestException.class);
 
                 if (!errors.isEmpty()) {
-                    TestHelper.assertError(errors, 0, TestException.class);
+                    TestHelper.assertUndeliverable(errors, 0, TestException.class);
                 }
             } finally {
                 RxJavaPlugins.reset();
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test(expected = NullPointerException.class)
+    public void zipArrayOneIsNull() {
+        Maybe.zipArray(new Function<Object[], Object>() {
+            @Override
+            public Object apply(Object[] v) {
+                return 1;
+            }
+        }, Maybe.just(1), null)
+        .blockingGet();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void singleSourceZipperReturnsNull() {
+        Maybe.zipArray(Functions.justFunction(null), Maybe.just(1))
+        .test()
+        .assertFailureAndMessage(NullPointerException.class, "The zipper returned a null value");
     }
 }

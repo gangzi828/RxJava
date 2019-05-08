@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,16 +14,23 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.subscriptions.BooleanSubscription;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableAnyTest {
@@ -31,7 +38,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithTwoItems() {
         Flowable<Integer> w = Flowable.just(1, 2);
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
@@ -40,7 +47,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(false);
         verify(observer, times(1)).onSuccess(true);
@@ -50,11 +57,11 @@ public class FlowableAnyTest {
     @Test
     public void testIsEmptyWithTwoItems() {
         Flowable<Integer> w = Flowable.just(1, 2);
-        Single<Boolean> observable = w.isEmpty();
+        Single<Boolean> single = w.isEmpty();
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(true);
         verify(observer, times(1)).onSuccess(false);
@@ -64,7 +71,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithOneItem() {
         Flowable<Integer> w = Flowable.just(1);
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
@@ -73,7 +80,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(false);
         verify(observer, times(1)).onSuccess(true);
@@ -83,11 +90,11 @@ public class FlowableAnyTest {
     @Test
     public void testIsEmptyWithOneItem() {
         Flowable<Integer> w = Flowable.just(1);
-        Single<Boolean> observable = w.isEmpty();
+        Single<Boolean> single = w.isEmpty();
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(true);
         verify(observer, times(1)).onSuccess(false);
@@ -97,7 +104,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithEmpty() {
         Flowable<Integer> w = Flowable.empty();
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
@@ -106,7 +113,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, times(1)).onSuccess(false);
         verify(observer, never()).onSuccess(true);
@@ -116,11 +123,11 @@ public class FlowableAnyTest {
     @Test
     public void testIsEmptyWithEmpty() {
         Flowable<Integer> w = Flowable.empty();
-        Single<Boolean> observable = w.isEmpty();
+        Single<Boolean> single = w.isEmpty();
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, times(1)).onSuccess(true);
         verify(observer, never()).onSuccess(false);
@@ -130,7 +137,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithPredicate1() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 2;
@@ -139,7 +146,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(false);
         verify(observer, times(1)).onSuccess(true);
@@ -149,7 +156,7 @@ public class FlowableAnyTest {
     @Test
     public void testExists1() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 2;
@@ -158,7 +165,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(false);
         verify(observer, times(1)).onSuccess(true);
@@ -168,7 +175,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithPredicate2() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 1;
@@ -177,7 +184,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, times(1)).onSuccess(false);
         verify(observer, never()).onSuccess(true);
@@ -188,7 +195,7 @@ public class FlowableAnyTest {
     public void testAnyWithEmptyAndPredicate() {
         // If the source is empty, always output false.
         Flowable<Integer> w = Flowable.empty();
-        Single<Boolean> observable = w.any(new Predicate<Integer>() {
+        Single<Boolean> single = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t) {
                 return true;
@@ -197,7 +204,7 @@ public class FlowableAnyTest {
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, times(1)).onSuccess(false);
         verify(observer, never()).onSuccess(true);
@@ -206,8 +213,8 @@ public class FlowableAnyTest {
 
     @Test
     public void testWithFollowingFirst() {
-        Flowable<Integer> o = Flowable.fromArray(1, 3, 5, 6);
-        Single<Boolean> anyEven = o.any(new Predicate<Integer>() {
+        Flowable<Integer> f = Flowable.fromArray(1, 3, 5, 6);
+        Single<Boolean> anyEven = f.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer i) {
                 return i % 2 == 0;
@@ -216,6 +223,7 @@ public class FlowableAnyTest {
 
         assertTrue(anyEven.blockingGet());
     }
+
     @Test(timeout = 5000)
     public void testIssue1935NoUnsubscribeDownstream() {
         Flowable<Integer> source = Flowable.just(1).isEmpty()
@@ -232,7 +240,7 @@ public class FlowableAnyTest {
     @Test
     @Ignore("Single doesn't do backpressure")
     public void testBackpressureIfNoneRequestedNoneShouldBeDelivered() {
-        TestObserver<Boolean> ts = new TestObserver<Boolean>();
+        TestObserver<Boolean> to = new TestObserver<Boolean>();
 
         Flowable.just(1).any(new Predicate<Integer>() {
             @Override
@@ -240,32 +248,32 @@ public class FlowableAnyTest {
                 return true;
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.assertNoValues();
-        ts.assertNoErrors();
-        ts.assertNotComplete();
+        to.assertNoValues();
+        to.assertNoErrors();
+        to.assertNotComplete();
     }
 
     @Test
     public void testBackpressureIfOneRequestedOneShouldBeDelivered() {
-        TestObserver<Boolean> ts = new TestObserver<Boolean>();
+        TestObserver<Boolean> to = new TestObserver<Boolean>();
         Flowable.just(1).any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
             }
-        }).subscribe(ts);
+        }).subscribe(to);
 
-        ts.assertTerminated();
-        ts.assertNoErrors();
-        ts.assertComplete();
-        ts.assertValue(true);
+        to.assertTerminated();
+        to.assertNoErrors();
+        to.assertComplete();
+        to.assertValue(true);
     }
 
     @Test
     public void testPredicateThrowsExceptionAndValueInCauseMessage() {
-        TestObserver<Boolean> ts = new TestObserver<Boolean>();
+        TestObserver<Boolean> to = new TestObserver<Boolean>();
         final IllegalArgumentException ex = new IllegalArgumentException();
 
         Flowable.just("Boo!").any(new Predicate<String>() {
@@ -273,12 +281,12 @@ public class FlowableAnyTest {
             public boolean test(String v) {
                 throw ex;
             }
-        }).subscribe(ts);
+        }).subscribe(to);
 
-        ts.assertTerminated();
-        ts.assertNoValues();
-        ts.assertNotComplete();
-        ts.assertError(ex);
+        to.assertTerminated();
+        to.assertNoValues();
+        to.assertNotComplete();
+        to.assertError(ex);
         // FIXME value as last cause?
 //        assertTrue(ex.getCause().getMessage().contains("Boo!"));
     }
@@ -286,7 +294,7 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithTwoItemsFlowable() {
         Flowable<Integer> w = Flowable.just(1, 2);
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
@@ -295,59 +303,59 @@ public class FlowableAnyTest {
         .toFlowable()
         ;
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, never()).onNext(false);
-        verify(observer, times(1)).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onNext(false);
+        verify(subscriber, times(1)).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testIsEmptyWithTwoItemsFlowable() {
         Flowable<Integer> w = Flowable.just(1, 2);
-        Flowable<Boolean> observable = w.isEmpty().toFlowable();
+        Flowable<Boolean> flowable = w.isEmpty().toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, never()).onNext(true);
-        verify(observer, times(1)).onNext(false);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onNext(true);
+        verify(subscriber, times(1)).onNext(false);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testAnyWithOneItemFlowable() {
         Flowable<Integer> w = Flowable.just(1);
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, never()).onNext(false);
-        verify(observer, times(1)).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onNext(false);
+        verify(subscriber, times(1)).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testIsEmptyWithOneItemFlowable() {
         Flowable<Integer> w = Flowable.just(1);
-        Single<Boolean> observable = w.isEmpty();
+        Single<Boolean> single = w.isEmpty();
 
         SingleObserver<Boolean> observer = TestHelper.mockSingleObserver();
 
-        observable.subscribe(observer);
+        single.subscribe(observer);
 
         verify(observer, never()).onSuccess(true);
         verify(observer, times(1)).onSuccess(false);
@@ -357,123 +365,123 @@ public class FlowableAnyTest {
     @Test
     public void testAnyWithEmptyFlowable() {
         Flowable<Integer> w = Flowable.empty();
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer v) {
                 return true;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(false);
-        verify(observer, never()).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(false);
+        verify(subscriber, never()).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testIsEmptyWithEmptyFlowable() {
         Flowable<Integer> w = Flowable.empty();
-        Flowable<Boolean> observable = w.isEmpty().toFlowable();
+        Flowable<Boolean> flowable = w.isEmpty().toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(true);
-        verify(observer, never()).onNext(false);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(true);
+        verify(subscriber, never()).onNext(false);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testAnyWithPredicate1Flowable() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 2;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, never()).onNext(false);
-        verify(observer, times(1)).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onNext(false);
+        verify(subscriber, times(1)).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testExists1Flowable() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 2;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, never()).onNext(false);
-        verify(observer, times(1)).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, never()).onNext(false);
+        verify(subscriber, times(1)).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testAnyWithPredicate2Flowable() {
         Flowable<Integer> w = Flowable.just(1, 2, 3);
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t1) {
                 return t1 < 1;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(false);
-        verify(observer, never()).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(false);
+        verify(subscriber, never()).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testAnyWithEmptyAndPredicateFlowable() {
         // If the source is empty, always output false.
         Flowable<Integer> w = Flowable.empty();
-        Flowable<Boolean> observable = w.any(new Predicate<Integer>() {
+        Flowable<Boolean> flowable = w.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer t) {
                 return true;
             }
         }).toFlowable();
 
-        Subscriber<Boolean> observer = TestHelper.mockSubscriber();
+        Subscriber<Boolean> subscriber = TestHelper.mockSubscriber();
 
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(false);
-        verify(observer, never()).onNext(true);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(false);
+        verify(subscriber, never()).onNext(true);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testWithFollowingFirstFlowable() {
-        Flowable<Integer> o = Flowable.fromArray(1, 3, 5, 6);
-        Flowable<Boolean> anyEven = o.any(new Predicate<Integer>() {
+        Flowable<Integer> f = Flowable.fromArray(1, 3, 5, 6);
+        Flowable<Boolean> anyEven = f.any(new Predicate<Integer>() {
             @Override
             public boolean test(Integer i) {
                 return i % 2 == 0;
@@ -482,6 +490,7 @@ public class FlowableAnyTest {
 
         assertTrue(anyEven.blockingFirst());
     }
+
     @Test(timeout = 5000)
     public void testIssue1935NoUnsubscribeDownstreamFlowable() {
         Flowable<Integer> source = Flowable.just(1).isEmpty()
@@ -546,5 +555,85 @@ public class FlowableAnyTest {
         ts.assertError(ex);
         // FIXME value as last cause?
 //        assertTrue(ex.getCause().getMessage().contains("Boo!"));
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.just(1).any(Functions.alwaysTrue()).toFlowable());
+
+        TestHelper.checkDisposed(Flowable.just(1).any(Functions.alwaysTrue()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Publisher<Boolean>>() {
+            @Override
+            public Publisher<Boolean> apply(Flowable<Object> f) throws Exception {
+                return f.any(Functions.alwaysTrue()).toFlowable();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeFlowableToSingle(new Function<Flowable<Object>, Single<Boolean>>() {
+            @Override
+            public Single<Boolean> apply(Flowable<Object> f) throws Exception {
+                return f.any(Functions.alwaysTrue());
+            }
+        });
+    }
+
+    @Test
+    public void predicateThrowsSuppressOthers() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+
+                    subscriber.onNext(1);
+                    subscriber.onNext(2);
+                    subscriber.onError(new IOException());
+                    subscriber.onComplete();
+                }
+            }
+            .any(new Predicate<Integer>() {
+                @Override
+                public boolean test(Integer v) throws Exception {
+                    throw new TestException();
+                }
+            })
+            .toFlowable()
+            .test()
+            .assertFailure(TestException.class);
+
+            TestHelper.assertUndeliverable(errors, 0, IOException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void badSourceSingle() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+                    subscriber.onError(new TestException("First"));
+
+                    subscriber.onNext(1);
+                    subscriber.onError(new TestException("Second"));
+                    subscriber.onComplete();
+                }
+            }
+            .any(Functions.alwaysTrue())
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

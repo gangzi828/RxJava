@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.concurrent.TimeUnit;
@@ -22,7 +23,10 @@ import org.mockito.InOrder;
 
 import io.reactivex.*;
 import io.reactivex.disposables.*;
-import io.reactivex.schedulers.TestScheduler;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Function;
+import io.reactivex.observers.TestObserver;
+import io.reactivex.schedulers.*;
 import io.reactivex.subjects.PublishSubject;
 
 public class ObservableSampleTest {
@@ -262,16 +266,176 @@ public class ObservableSampleTest {
 
     @Test
     public void testSampleUnsubscribe() {
-        final Disposable s = mock(Disposable.class);
+        final Disposable upstream = mock(Disposable.class);
         Observable<Integer> o = Observable.unsafeCreate(
                 new ObservableSource<Integer>() {
                     @Override
                     public void subscribe(Observer<? super Integer> observer) {
-                        observer.onSubscribe(s);
+                        observer.onSubscribe(upstream);
                     }
                 }
         );
         o.throttleLast(1, TimeUnit.MILLISECONDS).subscribe().dispose();
-        verify(s).dispose();
+        verify(upstream).dispose();
     }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishSubject.create().sample(1, TimeUnit.SECONDS, new TestScheduler()));
+
+        TestHelper.checkDisposed(PublishSubject.create().sample(Observable.never()));
+    }
+
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .sample(1, TimeUnit.SECONDS)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void emitLastTimed() {
+        Observable.just(1)
+        .sample(1, TimeUnit.DAYS, true)
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void emitLastTimedEmpty() {
+        Observable.empty()
+        .sample(1, TimeUnit.DAYS, true)
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void emitLastTimedCustomScheduler() {
+        Observable.just(1)
+        .sample(1, TimeUnit.DAYS, Schedulers.single(), true)
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void emitLastTimedRunCompleteRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final TestScheduler scheduler = new TestScheduler();
+
+            final PublishSubject<Integer> ps = PublishSubject.create();
+
+            TestObserver<Integer> to = ps.sample(1, TimeUnit.SECONDS, scheduler, true)
+            .test();
+
+            ps.onNext(1);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ps.onComplete();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            to.assertResult(1);
+        }
+    }
+
+    @Test
+    public void emitLastOther() {
+        Observable.just(1)
+        .sample(Observable.timer(1, TimeUnit.DAYS), true)
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void emitLastOtherEmpty() {
+        Observable.empty()
+        .sample(Observable.timer(1, TimeUnit.DAYS), true)
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void emitLastOtherRunCompleteRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishSubject<Integer> ps = PublishSubject.create();
+            final PublishSubject<Integer> sampler = PublishSubject.create();
+
+            TestObserver<Integer> to = ps.sample(sampler, true)
+            .test();
+
+            ps.onNext(1);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ps.onComplete();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    sampler.onNext(1);
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            to.assertResult(1);
+        }
+    }
+
+    @Test
+    public void emitLastOtherCompleteCompleteRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishSubject<Integer> ps = PublishSubject.create();
+            final PublishSubject<Integer> sampler = PublishSubject.create();
+
+            TestObserver<Integer> to = ps.sample(sampler, true).test();
+
+            ps.onNext(1);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ps.onComplete();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    sampler.onComplete();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            to.assertResult(1);
+        }
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, Observable<Object>>() {
+            @Override
+            public Observable<Object> apply(Observable<Object> o)
+                    throws Exception {
+                return o.sample(1, TimeUnit.SECONDS);
+            }
+        });
+    }
+
 }

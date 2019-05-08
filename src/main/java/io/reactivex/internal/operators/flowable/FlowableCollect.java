@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,8 +16,10 @@ import java.util.concurrent.Callable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiConsumer;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -26,7 +28,7 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
     final Callable<? extends U> initialSupplier;
     final BiConsumer<? super U, ? super T> collector;
 
-    public FlowableCollect(Publisher<T> source, Callable<? extends U> initialSupplier, BiConsumer<? super U, ? super T> collector) {
+    public FlowableCollect(Flowable<T> source, Callable<? extends U> initialSupplier, BiConsumer<? super U, ? super T> collector) {
         super(source);
         this.initialSupplier = initialSupplier;
         this.collector = collector;
@@ -36,20 +38,16 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
     protected void subscribeActual(Subscriber<? super U> s) {
         U u;
         try {
-            u = initialSupplier.call();
+            u = ObjectHelper.requireNonNull(initialSupplier.call(), "The initial value supplied is null");
         } catch (Throwable e) {
             EmptySubscription.error(e, s);
-            return;
-        }
-        if (u == null) {
-            EmptySubscription.error(new NullPointerException("The initial value supplied is null"), s);
             return;
         }
 
         source.subscribe(new CollectSubscriber<T, U>(s, u, collector));
     }
 
-    static final class CollectSubscriber<T, U> extends DeferredScalarSubscription<U> implements Subscriber<T> {
+    static final class CollectSubscriber<T, U> extends DeferredScalarSubscription<U> implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -3589550218733891694L;
 
@@ -57,7 +55,7 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
 
         final U u;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
@@ -69,9 +67,9 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -85,7 +83,7 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
                 collector.accept(u, t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
+                upstream.cancel();
                 onError(e);
             }
         }
@@ -97,7 +95,7 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -112,7 +110,7 @@ public final class FlowableCollect<T, U> extends AbstractFlowableWithUpstream<T,
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

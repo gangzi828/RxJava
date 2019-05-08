@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -27,7 +27,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 
@@ -55,9 +57,9 @@ public class SingleMiscTest {
 
         Single.wrap(new SingleSource<Object>() {
             @Override
-            public void subscribe(SingleObserver<? super Object> s) {
-                s.onSubscribe(Disposables.empty());
-                s.onSuccess(1);
+            public void subscribe(SingleObserver<? super Object> observer) {
+                observer.onSubscribe(Disposables.empty());
+                observer.onSuccess(1);
             }
         })
         .test()
@@ -85,7 +87,7 @@ public class SingleMiscTest {
         Single.just(1)
         .compose(new SingleTransformer<Integer, Object>() {
             @Override
-            public SingleSource<Object> apply(Single<Integer> f) throws Exception {
+            public SingleSource<Object> apply(Single<Integer> f) {
                 return f.map(new Function<Integer, Object>() {
                     @Override
                     public Object apply(Integer v) throws Exception {
@@ -199,11 +201,13 @@ public class SingleMiscTest {
 
     @Test
     public void retryTimes() {
+        final AtomicInteger calls = new AtomicInteger();
+
         Single.fromCallable(new Callable<Object>() {
-            int c;
+
             @Override
             public Object call() throws Exception {
-                if (++c != 5) {
+                if (calls.incrementAndGet() != 6) {
                     throw new TestException();
                 }
                 return 1;
@@ -212,6 +216,8 @@ public class SingleMiscTest {
         .retry(5)
         .test()
         .assertResult(1);
+
+        assertEquals(6, calls.get());
     }
 
     @Test
@@ -254,6 +260,7 @@ public class SingleMiscTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation")
     public void toCompletable() {
         Single.just(1)
         .toCompletable()
@@ -262,6 +269,19 @@ public class SingleMiscTest {
 
         Single.error(new TestException())
         .toCompletable()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void ignoreElement() {
+        Single.just(1)
+        .ignoreElement()
+        .test()
+        .assertResult();
+
+        Single.error(new TestException())
+        .ignoreElement()
         .test()
         .assertFailure(TestException.class);
     }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,7 +23,6 @@ import io.reactivex.internal.fuseable.QueueSubscription;
  * @param <T> the value type
  */
 public abstract class BasicQueueSubscription<T> extends AtomicLong implements QueueSubscription<T> {
-
 
     private static final long serialVersionUID = -6671519529404341862L;
 

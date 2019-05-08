@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,8 +12,6 @@
  */
 
 package io.reactivex.internal.operators.observable;
-
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
@@ -34,103 +32,97 @@ public final class ObservableSkipUntil<T, U> extends AbstractObservableWithUpstr
 
         final ArrayCompositeDisposable frc = new ArrayCompositeDisposable(2);
 
+        serial.onSubscribe(frc);
+
         final SkipUntilObserver<T> sus = new SkipUntilObserver<T>(serial, frc);
 
-        other.subscribe(new Observer<U>() {
-            Disposable s;
-            @Override
-            public void onSubscribe(Disposable s) {
-                if (DisposableHelper.validate(this.s, s)) {
-                    this.s = s;
-                    frc.setResource(1, s);
-                }
-            }
-
-            @Override
-            public void onNext(U t) {
-                s.dispose();
-                sus.notSkipping = true;
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                frc.dispose();
-                // in case the other emits an onError before the main even sets a subscription
-                if (sus.compareAndSet(false, true)) {
-                    EmptyDisposable.error(t, serial);
-                } else {
-                    serial.onError(t);
-                }
-            }
-
-            @Override
-            public void onComplete() {
-                sus.notSkipping = true;
-            }
-        });
+        other.subscribe(new SkipUntil(frc, sus, serial));
 
         source.subscribe(sus);
     }
 
-    static final class SkipUntilObserver<T> extends AtomicBoolean implements Observer<T>, Disposable {
+    static final class SkipUntilObserver<T> implements Observer<T> {
 
-        private static final long serialVersionUID = -1113667257122396604L;
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final ArrayCompositeDisposable frc;
 
-        Disposable s;
+        Disposable upstream;
 
         volatile boolean notSkipping;
         boolean notSkippingLocal;
 
         SkipUntilObserver(Observer<? super T> actual, ArrayCompositeDisposable frc) {
-            this.actual = actual;
+            this.downstream = actual;
             this.frc = frc;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                if (frc.setResource(0, s)) {
-                    if (compareAndSet(false, true)) {
-                        actual.onSubscribe(this);
-                    }
-                }
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                frc.setResource(0, d);
             }
         }
 
         @Override
         public void onNext(T t) {
             if (notSkippingLocal) {
-                actual.onNext(t);
+                downstream.onNext(t);
             } else
             if (notSkipping) {
                 notSkippingLocal = true;
-                actual.onNext(t);
+                downstream.onNext(t);
             }
         }
 
         @Override
         public void onError(Throwable t) {
             frc.dispose();
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             frc.dispose();
-            actual.onComplete();
+            downstream.onComplete();
+        }
+    }
+
+    final class SkipUntil implements Observer<U> {
+        final ArrayCompositeDisposable frc;
+        final SkipUntilObserver<T> sus;
+        final SerializedObserver<T> serial;
+        Disposable upstream;
+
+        SkipUntil(ArrayCompositeDisposable frc, SkipUntilObserver<T> sus, SerializedObserver<T> serial) {
+            this.frc = frc;
+            this.sus = sus;
+            this.serial = serial;
         }
 
         @Override
-        public void dispose() {
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                frc.setResource(1, d);
+            }
+        }
+
+        @Override
+        public void onNext(U t) {
+            upstream.dispose();
+            sus.notSkipping = true;
+        }
+
+        @Override
+        public void onError(Throwable t) {
             frc.dispose();
+            serial.onError(t);
         }
 
         @Override
-        public boolean isDisposed() {
-            return frc.isDisposed();
+        public void onComplete() {
+            sus.notSkipping = true;
         }
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,8 @@
 
 package io.reactivex.internal.operators.maybe;
 
+import static org.junit.Assert.assertEquals;
+
 import java.util.*;
 
 import org.junit.Test;
@@ -22,7 +24,6 @@ import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Function;
 import io.reactivex.internal.util.CrashingMappedIterable;
 import io.reactivex.processors.PublishProcessor;
-import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class MaybeConcatIterableTest {
@@ -59,11 +60,11 @@ public class MaybeConcatIterableTest {
     @SuppressWarnings("unchecked")
     @Test
     public void successCancelRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
 
             final PublishProcessor<Integer> pp = PublishProcessor.create();
 
-            final TestSubscriber<Integer> to = Maybe.concat(Arrays.asList(pp.singleElement()))
+            final TestSubscriber<Integer> ts = Maybe.concat(Arrays.asList(pp.singleElement()))
             .test();
 
             pp.onNext(1);
@@ -71,7 +72,7 @@ public class MaybeConcatIterableTest {
             Runnable r1 = new Runnable() {
                 @Override
                 public void run() {
-                    to.cancel();
+                    ts.cancel();
                 }
             };
 
@@ -82,7 +83,7 @@ public class MaybeConcatIterableTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
@@ -120,5 +121,45 @@ public class MaybeConcatIterableTest {
         }))
         .test()
         .assertFailure(NullPointerException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscription() {
+        final int[] calls = { 0 };
+
+        Maybe<Integer> source = Maybe.create(new MaybeOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(MaybeEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onSuccess(1);
+            }
+        });
+
+        Maybe.concat(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionDelayError() {
+        final int[] calls = { 0 };
+
+        Maybe<Integer> source = Maybe.create(new MaybeOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(MaybeEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onSuccess(1);
+            }
+        });
+
+        Maybe.concatDelayError(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
     }
 }

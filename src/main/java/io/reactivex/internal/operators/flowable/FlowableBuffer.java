@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,8 +19,10 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BooleanSupplier;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.*;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -32,7 +34,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
     final Callable<C> bufferSupplier;
 
-    public FlowableBuffer(Publisher<T> source, int size, int skip, Callable<C> bufferSupplier) {
+    public FlowableBuffer(Flowable<T> source, int size, int skip, Callable<C> bufferSupplier) {
         super(source);
         this.size = size;
         this.skip = skip;
@@ -51,9 +53,9 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
     }
 
     static final class PublisherBufferExactSubscriber<T, C extends Collection<? super T>>
-      implements Subscriber<T>, Subscription {
+      implements FlowableSubscriber<T>, Subscription {
 
-        final Subscriber<? super C> actual;
+        final Subscriber<? super C> downstream;
 
         final Callable<C> bufferSupplier;
 
@@ -61,14 +63,14 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         C buffer;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         int index;
 
         PublisherBufferExactSubscriber(Subscriber<? super C> actual, int size, Callable<C> bufferSupplier) {
-            this.actual = actual;
+            this.downstream = actual;
             this.size = size;
             this.bufferSupplier = bufferSupplier;
         }
@@ -76,21 +78,21 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
         @Override
         public void request(long n) {
             if (SubscriptionHelper.validate(n)) {
-                s.request(BackpressureHelper.multiplyCap(n, size));
+                upstream.request(BackpressureHelper.multiplyCap(n, size));
             }
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -104,7 +106,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             if (b == null) {
 
                 try {
-                    b = bufferSupplier.call();
+                    b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The bufferSupplier returned a null buffer");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     cancel();
@@ -112,12 +114,6 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
                     return;
                 }
 
-                if (b == null) {
-                    cancel();
-
-                    onError(new NullPointerException("The bufferSupplier returned a null buffer"));
-                    return;
-                }
                 buffer = b;
             }
 
@@ -127,7 +123,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             if (i == size) {
                 index = 0;
                 buffer = null;
-                actual.onNext(b);
+                downstream.onNext(b);
             } else {
                 index = i;
             }
@@ -140,7 +136,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -153,20 +149,19 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             C b = buffer;
 
             if (b != null && !b.isEmpty()) {
-                actual.onNext(b);
+                downstream.onNext(b);
             }
-            actual.onComplete();
+            downstream.onComplete();
         }
     }
 
     static final class PublisherBufferSkipSubscriber<T, C extends Collection<? super T>>
     extends AtomicInteger
-    implements Subscriber<T>, Subscription {
-
+    implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -5616169793639412593L;
 
-        final Subscriber<? super C> actual;
+        final Subscriber<? super C> downstream;
 
         final Callable<C> bufferSupplier;
 
@@ -176,15 +171,15 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         C buffer;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
-        long index;
+        int index;
 
         PublisherBufferSkipSubscriber(Subscriber<? super C> actual, int size, int skip,
                 Callable<C> bufferSupplier) {
-            this.actual = actual;
+            this.downstream = actual;
             this.size = size;
             this.skip = skip;
             this.bufferSupplier = bufferSupplier;
@@ -192,30 +187,32 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         @Override
         public void request(long n) {
-            if (get() == 0 && compareAndSet(0, 1)) {
-                // n full buffers
-                long u = BackpressureHelper.multiplyCap(n, size);
-                // + (n - 1) gaps
-                long v = BackpressureHelper.multiplyCap(skip - size, n - 1);
+            if (SubscriptionHelper.validate(n)) {
+                if (get() == 0 && compareAndSet(0, 1)) {
+                    // n full buffers
+                    long u = BackpressureHelper.multiplyCap(n, size);
+                    // + (n - 1) gaps
+                    long v = BackpressureHelper.multiplyCap(skip - size, n - 1);
 
-                s.request(BackpressureHelper.addCap(u, v));
-            } else {
-                // n full buffer + gap
-                s.request(BackpressureHelper.multiplyCap(skip, n));
+                    upstream.request(BackpressureHelper.addCap(u, v));
+                } else {
+                    // n full buffer + gap
+                    upstream.request(BackpressureHelper.multiplyCap(skip, n));
+                }
             }
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -227,23 +224,16 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
             C b = buffer;
 
-            long i = index;
+            int i = index;
 
-            if (i % skip == 0L) { // FIXME no need for modulo
+            if (i++ == 0) {
                 try {
-                    b = bufferSupplier.call();
+                    b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The bufferSupplier returned a null buffer");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     cancel();
 
                     onError(e);
-                    return;
-                }
-
-                if (b == null) {
-                    cancel();
-
-                    onError(new NullPointerException("The bufferSupplier returned a null buffer"));
                     return;
                 }
 
@@ -254,11 +244,14 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
                 b.add(t);
                 if (b.size() == size) {
                     buffer = null;
-                    actual.onNext(b);
+                    downstream.onNext(b);
                 }
             }
 
-            index = i + 1;
+            if (i == skip) {
+                i = 0;
+            }
+            index = i;
         }
 
         @Override
@@ -271,7 +264,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             done = true;
             buffer = null;
 
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -285,21 +278,20 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             buffer = null;
 
             if (b != null) {
-                actual.onNext(b);
+                downstream.onNext(b);
             }
 
-            actual.onComplete();
+            downstream.onComplete();
         }
     }
 
-
     static final class PublisherBufferOverlappingSubscriber<T, C extends Collection<? super T>>
     extends AtomicLong
-    implements Subscriber<T>, Subscription, BooleanSupplier {
+    implements FlowableSubscriber<T>, Subscription, BooleanSupplier {
 
         private static final long serialVersionUID = -7370244972039324525L;
 
-        final Subscriber<? super C> actual;
+        final Subscriber<? super C> downstream;
 
         final Callable<C> bufferSupplier;
 
@@ -311,11 +303,11 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         final AtomicBoolean once;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
-        long index;
+        int index;
 
         volatile boolean cancelled;
 
@@ -323,7 +315,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         PublisherBufferOverlappingSubscriber(Subscriber<? super C> actual, int size, int skip,
                 Callable<C> bufferSupplier) {
-            this.actual = actual;
+            this.downstream = actual;
             this.size = size;
             this.skip = skip;
             this.bufferSupplier = bufferSupplier;
@@ -338,41 +330,38 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
         @Override
         public void request(long n) {
+            if (SubscriptionHelper.validate(n)) {
+                if (QueueDrainHelper.postCompleteRequest(n, downstream, buffers, this, this)) {
+                    return;
+                }
 
-            if (!SubscriptionHelper.validate(n)) {
-                return;
-            }
+                if (!once.get() && once.compareAndSet(false, true)) {
+                    // (n - 1) skips
+                    long u = BackpressureHelper.multiplyCap(skip, n - 1);
 
-            if (QueueDrainHelper.postCompleteRequest(n, actual, buffers, this, this)) {
-                return;
-            }
-
-            if (!once.get() && once.compareAndSet(false, true)) {
-                // (n - 1) skips
-                long u = BackpressureHelper.multiplyCap(skip, n - 1);
-
-                // + 1 full buffer
-                long r = BackpressureHelper.addCap(size, u);
-                s.request(r);
-            } else {
-                // n skips
-                long r = BackpressureHelper.multiplyCap(skip, n);
-                s.request(r);
+                    // + 1 full buffer
+                    long r = BackpressureHelper.addCap(size, u);
+                    upstream.request(r);
+                } else {
+                    // n skips
+                    long r = BackpressureHelper.multiplyCap(skip, n);
+                    upstream.request(r);
+                }
             }
         }
 
         @Override
         public void cancel() {
             cancelled = true;
-            s.cancel();
+            upstream.cancel();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -384,24 +373,17 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
             ArrayDeque<C> bs = buffers;
 
-            long i = index;
+            int i = index;
 
-            if (i % skip == 0L) { // FIXME no need for modulo
+            if (i++ == 0) {
                 C b;
 
                 try {
-                    b = bufferSupplier.call();
+                    b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The bufferSupplier returned a null buffer");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     cancel();
                     onError(e);
-                    return;
-                }
-
-                if (b == null) {
-                    cancel();
-
-                    onError(new NullPointerException("The bufferSupplier returned a null buffer"));
                     return;
                 }
 
@@ -417,14 +399,17 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
 
                 produced++;
 
-                actual.onNext(b);
+                downstream.onNext(b);
             }
 
             for (C b0 : bs) {
                 b0.add(t);
             }
 
-            index = i + 1;
+            if (i == skip) {
+                i = 0;
+            }
+            index = i;
         }
 
         @Override
@@ -437,7 +422,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             done = true;
             buffers.clear();
 
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -452,7 +437,7 @@ public final class FlowableBuffer<T, C extends Collection<? super T>> extends Ab
             if (p != 0L) {
                 BackpressureHelper.produced(this, p);
             }
-            QueueDrainHelper.postComplete(actual, buffers, this, this);
+            QueueDrainHelper.postComplete(downstream, buffers, this, this);
         }
     }
 }

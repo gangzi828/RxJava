@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,20 +13,22 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
-import io.reactivex.internal.subscriptions.*;
-import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.internal.fuseable.ConditionalSubscriber;
+import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.subscribers.SerializedSubscriber;
 
 public final class FlowableWithLatestFrom<T, U, R> extends AbstractFlowableWithUpstream<T, R> {
     final BiFunction<? super T, ? super U, ? extends R> combiner;
     final Publisher<? extends U> other;
-    public FlowableWithLatestFrom(Publisher<T> source, BiFunction<? super T, ? super U, ? extends R> combiner, Publisher<? extends U> other) {
+    public FlowableWithLatestFrom(Flowable<T> source, BiFunction<? super T, ? super U, ? extends R> combiner, Publisher<? extends U> other) {
         super(source);
         this.combiner = combiner;
         this.other = other;
@@ -37,124 +39,125 @@ public final class FlowableWithLatestFrom<T, U, R> extends AbstractFlowableWithU
         final SerializedSubscriber<R> serial = new SerializedSubscriber<R>(s);
         final WithLatestFromSubscriber<T, U, R> wlf = new WithLatestFromSubscriber<T, U, R>(serial, combiner);
 
-        other.subscribe(new Subscriber<U>() {
-            @Override
-            public void onSubscribe(Subscription s) {
-                if (wlf.setOther(s)) {
-                    s.request(Long.MAX_VALUE);
-                }
-            }
+        serial.onSubscribe(wlf);
 
-            @Override
-            public void onNext(U t) {
-                wlf.lazySet(t);
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                wlf.otherError(t);
-            }
-
-            @Override
-            public void onComplete() {
-                // nothing to do, the wlf will complete on its own pace
-            }
-        });
+        other.subscribe(new FlowableWithLatestSubscriber(wlf));
 
         source.subscribe(wlf);
     }
 
-    static final class WithLatestFromSubscriber<T, U, R> extends AtomicReference<U> implements Subscriber<T>, Subscription {
+    static final class WithLatestFromSubscriber<T, U, R> extends AtomicReference<U>
+    implements ConditionalSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -312246233408980075L;
 
-        final Subscriber<? super R> actual;
+        final Subscriber<? super R> downstream;
+
         final BiFunction<? super T, ? super U, ? extends R> combiner;
 
-        final AtomicReference<Subscription> s = new AtomicReference<Subscription>();
+        final AtomicReference<Subscription> upstream = new AtomicReference<Subscription>();
+
+        final AtomicLong requested = new AtomicLong();
 
         final AtomicReference<Subscription> other = new AtomicReference<Subscription>();
 
         WithLatestFromSubscriber(Subscriber<? super R> actual, BiFunction<? super T, ? super U, ? extends R> combiner) {
-            this.actual = actual;
+            this.downstream = actual;
             this.combiner = combiner;
         }
+
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this.s, s)) {
-                actual.onSubscribe(this);
-            }
+            SubscriptionHelper.deferredSetOnce(this.upstream, requested, s);
         }
 
         @Override
         public void onNext(T t) {
+            if (!tryOnNext(t)) {
+                upstream.get().request(1);
+            }
+        }
+
+        @Override
+        public boolean tryOnNext(T t) {
             U u = get();
             if (u != null) {
                 R r;
                 try {
-                    r = combiner.apply(t, u);
+                    r = ObjectHelper.requireNonNull(combiner.apply(t, u), "The combiner returned a null value");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     cancel();
-                    actual.onError(e);
-                    return;
+                    downstream.onError(e);
+                    return false;
                 }
-                actual.onNext(r);
+                downstream.onNext(r);
+                return true;
+            } else {
+                return false;
             }
         }
 
         @Override
         public void onError(Throwable t) {
             SubscriptionHelper.cancel(other);
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             SubscriptionHelper.cancel(other);
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void request(long n) {
-            s.get().request(n);
+            SubscriptionHelper.deferredRequest(upstream, requested, n);
         }
 
         @Override
         public void cancel() {
-            s.get().cancel();
+            SubscriptionHelper.cancel(upstream);
             SubscriptionHelper.cancel(other);
         }
 
         public boolean setOther(Subscription o) {
-            for (;;) {
-                Subscription current = other.get();
-                if (current == SubscriptionHelper.CANCELLED) {
-                    o.cancel();
-                    return false;
-                }
-                if (current != null) {
-                    RxJavaPlugins.onError(new IllegalStateException("Other subscription already set!"));
-                    o.cancel();
-                    return false;
-                }
-                if (other.compareAndSet(null, o)) {
-                    return true;
-                }
-            }
+            return SubscriptionHelper.setOnce(other, o);
         }
 
         public void otherError(Throwable e) {
-            if (s.compareAndSet(null, SubscriptionHelper.CANCELLED)) {
-                EmptySubscription.error(e, actual);
-            } else {
-                if (s.get() != SubscriptionHelper.CANCELLED) {
-                    cancel();
-                    actual.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
+            SubscriptionHelper.cancel(upstream);
+            downstream.onError(e);
+        }
+    }
+
+    final class FlowableWithLatestSubscriber implements FlowableSubscriber<U> {
+        private final WithLatestFromSubscriber<T, U, R> wlf;
+
+        FlowableWithLatestSubscriber(WithLatestFromSubscriber<T, U, R> wlf) {
+            this.wlf = wlf;
+        }
+
+        @Override
+        public void onSubscribe(Subscription s) {
+            if (wlf.setOther(s)) {
+                s.request(Long.MAX_VALUE);
             }
+        }
+
+        @Override
+        public void onNext(U t) {
+            wlf.lazySet(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            wlf.otherError(t);
+        }
+
+        @Override
+        public void onComplete() {
+            // nothing to do, the wlf will complete on its own pace
         }
     }
 }

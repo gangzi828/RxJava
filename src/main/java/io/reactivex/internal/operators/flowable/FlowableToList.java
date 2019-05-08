@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,13 +18,15 @@ import java.util.concurrent.Callable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.*;
 
 public final class FlowableToList<T, U extends Collection<? super T>> extends AbstractFlowableWithUpstream<T, U> {
     final Callable<U> collectionSupplier;
 
-    public FlowableToList(Publisher<T> source, Callable<U> collectionSupplier) {
+    public FlowableToList(Flowable<T> source, Callable<U> collectionSupplier) {
         super(source);
         this.collectionSupplier = collectionSupplier;
     }
@@ -33,7 +35,7 @@ public final class FlowableToList<T, U extends Collection<? super T>> extends Ab
     protected void subscribeActual(Subscriber<? super U> s) {
         U coll;
         try {
-            coll = collectionSupplier.call();
+            coll = ObjectHelper.requireNonNull(collectionSupplier.call(), "The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             EmptySubscription.error(e, s);
@@ -42,14 +44,12 @@ public final class FlowableToList<T, U extends Collection<? super T>> extends Ab
         source.subscribe(new ToListSubscriber<T, U>(s, coll));
     }
 
-
     static final class ToListSubscriber<T, U extends Collection<? super T>>
     extends DeferredScalarSubscription<U>
-    implements Subscriber<T>, Subscription {
-
+    implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -8134157938864266736L;
-        Subscription s;
+        Subscription upstream;
 
         ToListSubscriber(Subscriber<? super U> actual, U collection) {
             super(actual);
@@ -58,22 +58,25 @@ public final class FlowableToList<T, U extends Collection<? super T>> extends Ab
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
 
         @Override
         public void onNext(T t) {
-            value.add(t);
+            U v = value;
+            if (v != null) {
+                v.add(t);
+            }
         }
 
         @Override
         public void onError(Throwable t) {
             value = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -84,7 +87,7 @@ public final class FlowableToList<T, U extends Collection<? super T>> extends Ab
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

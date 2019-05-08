@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,25 +14,33 @@
 package io.reactivex.subjects;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.lang.management.*;
 import java.util.Arrays;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.*;
 
-import org.junit.Test;
+import org.junit.*;
 import org.mockito.*;
 
 import io.reactivex.*;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
-import io.reactivex.functions.Function;
+import io.reactivex.functions.*;
 import io.reactivex.observers.*;
 import io.reactivex.schedulers.*;
+import io.reactivex.subjects.ReplaySubject.*;
 
-public class ReplaySubjectTest {
+public class ReplaySubjectTest extends SubjectTest<Integer> {
 
     private final Throwable testException = new Throwable();
+
+    @Override
+    protected Subject<Integer> create() {
+        return ReplaySubject.create();
+    }
 
     @Test
     public void testCompleted() {
@@ -65,9 +73,9 @@ public class ReplaySubjectTest {
         Observer<Object> observerB = TestHelper.mockObserver();
         Observer<Object> observerC = TestHelper.mockObserver();
         Observer<Object> observerD = TestHelper.mockObserver();
-        TestObserver<Object> ts = new TestObserver<Object>(observerA);
+        TestObserver<Object> to = new TestObserver<Object>(observerA);
 
-        channel.subscribe(ts);
+        channel.subscribe(to);
         channel.subscribe(observerB);
 
         InOrder inOrderA = inOrder(observerA);
@@ -81,7 +89,7 @@ public class ReplaySubjectTest {
         inOrderA.verify(observerA).onNext(42);
         inOrderB.verify(observerB).onNext(42);
 
-        ts.dispose();
+        to.dispose();
 
         // a should receive no more
         inOrderA.verifyNoMoreInteractions();
@@ -216,13 +224,13 @@ public class ReplaySubjectTest {
         ReplaySubject<String> subject = ReplaySubject.create();
 
         Observer<String> observer = TestHelper.mockObserver();
-        TestObserver<String> ts = new TestObserver<String>(observer);
-        subject.subscribe(ts);
+        TestObserver<String> to = new TestObserver<String>(observer);
+        subject.subscribe(to);
 
         subject.onNext("one");
         subject.onNext("two");
 
-        ts.dispose();
+        to.dispose();
         assertObservedUntilTwo(observer);
 
         Observer<String> anotherSubscriber = TestHelper.mockObserver();
@@ -341,18 +349,20 @@ public class ReplaySubjectTest {
         assertEquals("three", lastValueForSubscriber2.get());
 
     }
+
     @Test
     public void testSubscriptionLeak() {
         ReplaySubject<Object> subject = ReplaySubject.create();
 
-        Disposable s = subject.subscribe();
+        Disposable d = subject.subscribe();
 
         assertEquals(1, subject.observerCount());
 
-        s.dispose();
+        d.dispose();
 
         assertEquals(0, subject.observerCount());
     }
+
     @Test(timeout = 1000)
     public void testUnsubscriptionCase() {
         ReplaySubject<String> src = ReplaySubject.create();
@@ -394,6 +404,7 @@ public class ReplaySubjectTest {
             verify(o, never()).onError(any(Throwable.class));
         }
     }
+
     @Test
     public void testTerminateOnce() {
         ReplaySubject<Integer> source = ReplaySubject.create();
@@ -446,6 +457,7 @@ public class ReplaySubjectTest {
             verify(o, never()).onError(any(Throwable.class));
         }
     }
+
     @Test
     public void testReplay1Directly() {
         ReplaySubject<Integer> source = ReplaySubject.createWithSize(1);
@@ -491,7 +503,7 @@ public class ReplaySubjectTest {
 
         verify(o, never()).onNext(1);
         verify(o, never()).onNext(2);
-        verify(o).onNext(3);
+        verify(o, never()).onNext(3);
         verify(o).onComplete();
         verify(o, never()).onError(any(Throwable.class));
     }
@@ -534,8 +546,8 @@ public class ReplaySubjectTest {
 //        ReplaySubject<String> ps = ReplaySubject.create();
 //
 //        ps.subscribe();
-//        TestObserver<String> ts = new TestObserver<String>();
-//        ps.subscribe(ts);
+//        TestObserver<String> to = new TestObserver<String>();
+//        ps.subscribe(to);
 //
 //        try {
 //            ps.onError(new RuntimeException("an exception"));
@@ -544,7 +556,7 @@ public class ReplaySubjectTest {
 //            // ignore
 //        }
 //        // even though the onError above throws we should still receive it on the other subscriber
-//        assertEquals(1, ts.errors().size());
+//        assertEquals(1, to.errors().size());
 //    }
 
     // FIXME RS subscribers can't throw
@@ -557,8 +569,8 @@ public class ReplaySubjectTest {
 //
 //        ps.subscribe();
 //        ps.subscribe();
-//        TestObserver<String> ts = new TestObserver<String>();
-//        ps.subscribe(ts);
+//        TestObserver<String> to = new TestObserver<String>();
+//        ps.subscribe(to);
 //        ps.subscribe();
 //        ps.subscribe();
 //        ps.subscribe();
@@ -571,7 +583,7 @@ public class ReplaySubjectTest {
 //            assertEquals(5, e.getExceptions().size());
 //        }
 //        // even though the onError above throws we should still receive it on the other subscriber
-//        assertEquals(1, ts.getOnErrorEvents().size());
+//        assertEquals(1, to.getOnErrorEvents().size());
 //    }
 
     @Test
@@ -609,6 +621,7 @@ public class ReplaySubjectTest {
         assertTrue(as.hasComplete());
         assertNull(as.getThrowable());
     }
+
     @Test
     public void testCurrentStateMethodsError() {
         ReplaySubject<Object> as = ReplaySubject.create();
@@ -623,6 +636,7 @@ public class ReplaySubjectTest {
         assertFalse(as.hasComplete());
         assertTrue(as.getThrowable() instanceof TestException);
     }
+
     @Test
     public void testSizeAndHasAnyValueUnbounded() {
         ReplaySubject<Object> rs = ReplaySubject.create();
@@ -645,6 +659,7 @@ public class ReplaySubjectTest {
         assertEquals(2, rs.size());
         assertTrue(rs.hasValue());
     }
+
     @Test
     public void testSizeAndHasAnyValueEffectivelyUnbounded() {
         ReplaySubject<Object> rs = ReplaySubject.createUnbounded();
@@ -690,6 +705,7 @@ public class ReplaySubjectTest {
         assertEquals(2, rs.size());
         assertTrue(rs.hasValue());
     }
+
     @Test
     public void testSizeAndHasAnyValueEffectivelyUnboundedError() {
         ReplaySubject<Object> rs = ReplaySubject.createUnbounded();
@@ -722,6 +738,7 @@ public class ReplaySubjectTest {
         assertEquals(0, rs.size());
         assertFalse(rs.hasValue());
     }
+
     @Test
     public void testSizeAndHasAnyValueEffectivelyUnboundedEmptyError() {
         ReplaySubject<Object> rs = ReplaySubject.createUnbounded();
@@ -741,6 +758,7 @@ public class ReplaySubjectTest {
         assertEquals(0, rs.size());
         assertFalse(rs.hasValue());
     }
+
     @Test
     public void testSizeAndHasAnyValueEffectivelyUnboundedEmptyCompleted() {
         ReplaySubject<Object> rs = ReplaySubject.createUnbounded();
@@ -773,17 +791,19 @@ public class ReplaySubjectTest {
 
     @Test
     public void testSizeAndHasAnyValueTimeBounded() {
-        TestScheduler ts = new TestScheduler();
-        ReplaySubject<Object> rs = ReplaySubject.createWithTime(1, TimeUnit.SECONDS, ts);
+        TestScheduler to = new TestScheduler();
+        ReplaySubject<Object> rs = ReplaySubject.createWithTime(1, TimeUnit.SECONDS, to);
 
         assertEquals(0, rs.size());
         assertFalse(rs.hasValue());
 
         for (int i = 0; i < 1000; i++) {
             rs.onNext(i);
-            ts.advanceTimeBy(2, TimeUnit.SECONDS);
             assertEquals(1, rs.size());
             assertTrue(rs.hasValue());
+            to.advanceTimeBy(2, TimeUnit.SECONDS);
+            assertEquals(0, rs.size());
+            assertFalse(rs.hasValue());
         }
 
         rs.onComplete();
@@ -791,6 +811,7 @@ public class ReplaySubjectTest {
         assertEquals(0, rs.size());
         assertFalse(rs.hasValue());
     }
+
     @Test
     public void testGetValues() {
         ReplaySubject<Object> rs = ReplaySubject.create();
@@ -805,6 +826,7 @@ public class ReplaySubjectTest {
         assertArrayEquals(expected, rs.getValues());
 
     }
+
     @Test
     public void testGetValuesUnbounded() {
         ReplaySubject<Object> rs = ReplaySubject.createUnbounded();
@@ -855,11 +877,11 @@ public class ReplaySubjectTest {
 
         assertFalse(rp.hasObservers());
 
-        TestObserver<Integer> ts = rp.test();
+        TestObserver<Integer> to = rp.test();
 
         assertTrue(rp.hasObservers());
 
-        ts.cancel();
+        to.cancel();
 
         assertFalse(rp.hasObservers());
     }
@@ -929,26 +951,396 @@ public class ReplaySubjectTest {
     }
 
     @Test
-    public void onNextNull() {
-        final ReplaySubject<Object> s = ReplaySubject.create();
+    public void peekStateTimeAndSizeValueExpired() {
+        TestScheduler scheduler = new TestScheduler();
+        ReplaySubject<Integer> rp = ReplaySubject.createWithTime(1, TimeUnit.DAYS, scheduler);
 
-        s.onNext(null);
+        assertNull(rp.getValue());
+        assertNull(rp.getValues(new Integer[2])[0]);
 
-        s.test()
-            .assertNoValues()
-            .assertError(NullPointerException.class)
-            .assertErrorMessage("onNext called with null. Null values are generally not allowed in 2.x operators and sources.");
+        rp.onNext(2);
+
+        assertEquals((Integer)2, rp.getValue());
+        assertEquals(2, rp.getValues()[0]);
+
+        scheduler.advanceTimeBy(2, TimeUnit.DAYS);
+
+        assertEquals(null, rp.getValue());
+        assertEquals(0, rp.getValues().length);
+        assertNull(rp.getValues(new Integer[2])[0]);
     }
 
     @Test
-    public void onErrorNull() {
-        final ReplaySubject<Object> s = ReplaySubject.create();
+    public void capacityHint() {
+        ReplaySubject<Integer> rp = ReplaySubject.create(8);
 
-        s.onError(null);
+        for (int i = 0; i < 15; i++) {
+            rp.onNext(i);
+        }
+        rp.onComplete();
 
-        s.test()
-            .assertNoValues()
-            .assertError(NullPointerException.class)
-            .assertErrorMessage("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
+        rp.test().assertResult(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+    }
+
+    @Test
+    public void subscribeCancelRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final TestObserver<Integer> to = new TestObserver<Integer>();
+
+            final ReplaySubject<Integer> rp = ReplaySubject.create();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    rp.subscribe(to);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    to.cancel();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void subscribeAfterDone() {
+        ReplaySubject<Integer> rp = ReplaySubject.create();
+        rp.onComplete();
+
+        Disposable bs = Disposables.empty();
+
+        rp.onSubscribe(bs);
+
+        assertTrue(bs.isDisposed());
+    }
+
+    @Test
+    public void subscribeRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final ReplaySubject<Integer> rp = ReplaySubject.create();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    rp.test();
+                }
+            };
+
+            TestHelper.race(r1, r1);
+        }
+    }
+
+    @Test
+    public void cancelUpfront() {
+        ReplaySubject<Integer> rp = ReplaySubject.create();
+        rp.test();
+        rp.test();
+
+        TestObserver<Integer> to = rp.test(true);
+
+        assertEquals(2, rp.observerCount());
+
+        to.assertEmpty();
+    }
+
+    @Test
+    public void cancelRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+
+            final ReplaySubject<Integer> rp = ReplaySubject.create();
+            final TestObserver<Integer> to1 = rp.test();
+            final TestObserver<Integer> to2 = rp.test();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    to1.cancel();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    to2.cancel();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            assertFalse(rp.hasObservers());
+        }
+    }
+
+    @Test
+    public void sizeboundReplayError() {
+        ReplaySubject<Integer> rp = ReplaySubject.createWithSize(2);
+
+        rp.onNext(1);
+        rp.onNext(2);
+        rp.onNext(3);
+        rp.onNext(4);
+        rp.onError(new TestException());
+
+        rp.test()
+        .assertFailure(TestException.class, 3, 4);
+    }
+
+    @Test
+    public void sizeAndTimeBoundReplayError() {
+        ReplaySubject<Integer> rp = ReplaySubject.createWithTimeAndSize(1, TimeUnit.DAYS, Schedulers.single(), 2);
+
+        rp.onNext(1);
+        rp.onNext(2);
+        rp.onNext(3);
+        rp.onNext(4);
+        rp.onError(new TestException());
+
+        rp.test()
+        .assertFailure(TestException.class, 3, 4);
+    }
+
+    @Test
+    public void timedSkipOld() {
+        TestScheduler scheduler = new TestScheduler();
+
+        ReplaySubject<Integer> rp = ReplaySubject.createWithTimeAndSize(1, TimeUnit.SECONDS, scheduler, 2);
+
+        rp.onNext(1);
+        scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
+
+        rp.test()
+        .assertEmpty();
+    }
+
+    @Test
+    public void takeSizeAndTime() {
+        TestScheduler scheduler = new TestScheduler();
+
+        ReplaySubject<Integer> rp = ReplaySubject.createWithTimeAndSize(1, TimeUnit.SECONDS, scheduler, 2);
+
+        rp.onNext(1);
+        rp.onNext(2);
+        rp.onNext(3);
+
+        rp
+        .take(1)
+        .test()
+        .assertResult(2);
+    }
+
+    @Test
+    public void takeSize() {
+        ReplaySubject<Integer> rp = ReplaySubject.createWithSize(2);
+
+        rp.onNext(1);
+        rp.onNext(2);
+        rp.onNext(3);
+
+        rp
+        .take(1)
+        .test()
+        .assertResult(2);
+    }
+
+    @Test
+    public void reentrantDrain() {
+        TestScheduler scheduler = new TestScheduler();
+
+        final ReplaySubject<Integer> rp = ReplaySubject.createWithTimeAndSize(1, TimeUnit.SECONDS, scheduler, 2);
+
+        TestObserver<Integer> to = new TestObserver<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                if (t == 1) {
+                    rp.onNext(2);
+                }
+                super.onNext(t);
+            }
+        };
+
+        rp.subscribe(to);
+
+        rp.onNext(1);
+        rp.onComplete();
+
+        to.assertResult(1, 2);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(ReplaySubject.create());
+
+        TestHelper.checkDisposed(ReplaySubject.createUnbounded());
+
+        TestHelper.checkDisposed(ReplaySubject.createWithSize(10));
+
+        TestHelper.checkDisposed(ReplaySubject.createWithTimeAndSize(1, TimeUnit.SECONDS, Schedulers.single(), 10));
+    }
+
+    @Test
+    public void timedNoOutdatedData() {
+        TestScheduler scheduler = new TestScheduler();
+
+        ReplaySubject<Integer> source = ReplaySubject.createWithTime(2, TimeUnit.SECONDS, scheduler);
+        source.onNext(1);
+        source.onComplete();
+
+        source.test().assertResult(1);
+
+        source.test().assertResult(1);
+
+        scheduler.advanceTimeBy(3, TimeUnit.SECONDS);
+
+        source.test().assertResult();
+    }
+
+    @Test
+    public void noHeadRetentionCompleteSize() {
+        ReplaySubject<Integer> source = ReplaySubject.createWithSize(1);
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onComplete();
+
+        SizeBoundReplayBuffer<Integer> buf = (SizeBoundReplayBuffer<Integer>)source.buffer;
+
+        assertNull(buf.head.value);
+
+        Object o = buf.head;
+
+        source.cleanupBuffer();
+
+        assertSame(o, buf.head);
+    }
+
+    @Test
+    public void noHeadRetentionSize() {
+        ReplaySubject<Integer> source = ReplaySubject.createWithSize(1);
+
+        source.onNext(1);
+        source.onNext(2);
+
+        SizeBoundReplayBuffer<Integer> buf = (SizeBoundReplayBuffer<Integer>)source.buffer;
+
+        assertNotNull(buf.head.value);
+
+        source.cleanupBuffer();
+
+        assertNull(buf.head.value);
+
+        Object o = buf.head;
+
+        source.cleanupBuffer();
+
+        assertSame(o, buf.head);
+    }
+
+    @Test
+    public void noHeadRetentionCompleteTime() {
+        ReplaySubject<Integer> source = ReplaySubject.createWithTime(1, TimeUnit.MINUTES, Schedulers.computation());
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onComplete();
+
+        SizeAndTimeBoundReplayBuffer<Integer> buf = (SizeAndTimeBoundReplayBuffer<Integer>)source.buffer;
+
+        assertNull(buf.head.value);
+
+        Object o = buf.head;
+
+        source.cleanupBuffer();
+
+        assertSame(o, buf.head);
+    }
+
+    @Test
+    public void noHeadRetentionTime() {
+        TestScheduler sch = new TestScheduler();
+
+        ReplaySubject<Integer> source = ReplaySubject.createWithTime(1, TimeUnit.MILLISECONDS, sch);
+
+        source.onNext(1);
+
+        sch.advanceTimeBy(2, TimeUnit.MILLISECONDS);
+
+        source.onNext(2);
+
+        SizeAndTimeBoundReplayBuffer<Integer> buf = (SizeAndTimeBoundReplayBuffer<Integer>)source.buffer;
+
+        assertNotNull(buf.head.value);
+
+        source.cleanupBuffer();
+
+        assertNull(buf.head.value);
+
+        Object o = buf.head;
+
+        source.cleanupBuffer();
+
+        assertSame(o, buf.head);
+    }
+
+    @Test
+    public void noBoundedRetentionViaThreadLocal() throws Exception {
+        final ReplaySubject<byte[]> rs = ReplaySubject.createWithSize(1);
+
+        Observable<byte[]> source = rs.take(1)
+        .concatMap(new Function<byte[], Observable<byte[]>>() {
+            @Override
+            public Observable<byte[]> apply(byte[] v) throws Exception {
+                return rs;
+            }
+        })
+        .takeLast(1)
+        ;
+
+        System.out.println("Bounded Replay Leak check: Wait before GC");
+        Thread.sleep(1000);
+
+        System.out.println("Bounded Replay Leak check: GC");
+        System.gc();
+
+        Thread.sleep(500);
+
+        final MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
+        MemoryUsage memHeap = memoryMXBean.getHeapMemoryUsage();
+        long initial = memHeap.getUsed();
+
+        System.out.printf("Bounded Replay Leak check: Starting: %.3f MB%n", initial / 1024.0 / 1024.0);
+
+        final AtomicLong after = new AtomicLong();
+
+        source.subscribe(new Consumer<byte[]>() {
+            @Override
+            public void accept(byte[] v) throws Exception {
+                System.out.println("Bounded Replay Leak check: Wait before GC 2");
+                Thread.sleep(1000);
+
+                System.out.println("Bounded Replay Leak check:  GC 2");
+                System.gc();
+
+                Thread.sleep(500);
+
+                after.set(memoryMXBean.getHeapMemoryUsage().getUsed());
+            }
+        });
+
+        for (int i = 0; i < 200; i++) {
+            rs.onNext(new byte[1024 * 1024]);
+        }
+        rs.onComplete();
+
+        System.out.printf("Bounded Replay Leak check: After: %.3f MB%n", after.get() / 1024.0 / 1024.0);
+
+        if (initial + 100 * 1024 * 1024 < after.get()) {
+            Assert.fail("Bounded Replay Leak check: Memory leak detected: " + (initial / 1024.0 / 1024.0)
+                    + " -> " + after.get() / 1024.0 / 1024.0);
+        }
     }
 }

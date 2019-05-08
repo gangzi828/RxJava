@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,7 +18,6 @@ import static org.junit.Assert.*;
 import org.junit.Test;
 
 import io.reactivex.TestHelper;
-import io.reactivex.schedulers.Schedulers;
 
 public class ArrayCompositeSubscriptionTest {
 
@@ -94,7 +93,7 @@ public class ArrayCompositeSubscriptionTest {
 
     @Test
     public void disposeRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final ArrayCompositeSubscription ac = new ArrayCompositeSubscription(1000);
 
             Runnable r = new Runnable() {
@@ -104,13 +103,13 @@ public class ArrayCompositeSubscriptionTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.single());
+            TestHelper.race(r, r);
         }
     }
 
     @Test
     public void setReplaceRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final ArrayCompositeSubscription ac = new ArrayCompositeSubscription(1);
 
             final BooleanSubscription s1 = new BooleanSubscription();
@@ -130,7 +129,7 @@ public class ArrayCompositeSubscriptionTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 

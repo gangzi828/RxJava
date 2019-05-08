@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,8 +16,11 @@ package io.reactivex.internal.operators.single;
 import java.util.concurrent.Callable;
 
 import io.reactivex.*;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
 import io.reactivex.exceptions.Exceptions;
-import io.reactivex.internal.disposables.EmptyDisposable;
+import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class SingleFromCallable<T> extends Single<T> {
 
@@ -28,20 +31,29 @@ public final class SingleFromCallable<T> extends Single<T> {
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super T> s) {
+    protected void subscribeActual(SingleObserver<? super T> observer) {
+        Disposable d = Disposables.empty();
+        observer.onSubscribe(d);
 
-        s.onSubscribe(EmptyDisposable.INSTANCE);
+        if (d.isDisposed()) {
+            return;
+        }
+        T value;
+
         try {
-            T v = callable.call();
-            if (v != null) {
-                s.onSuccess(v);
+            value = ObjectHelper.requireNonNull(callable.call(), "The callable returned a null value");
+        } catch (Throwable ex) {
+            Exceptions.throwIfFatal(ex);
+            if (!d.isDisposed()) {
+                observer.onError(ex);
             } else {
-                s.onError(new NullPointerException("The callable returned a null value"));
+                RxJavaPlugins.onError(ex);
             }
-        } catch (Throwable e) {
-            Exceptions.throwIfFatal(e);
-            s.onError(e);
+            return;
+        }
+
+        if (!d.isDisposed()) {
+            observer.onSuccess(value);
         }
     }
-
 }

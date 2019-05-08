@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,37 +32,45 @@ public final class SingleDoOnEvent<T> extends Single<T> {
     }
 
     @Override
-    protected void subscribeActual(final SingleObserver<? super T> s) {
+    protected void subscribeActual(final SingleObserver<? super T> observer) {
 
-        source.subscribe(new SingleObserver<T>() {
-            @Override
-            public void onSubscribe(Disposable d) {
-                s.onSubscribe(d);
+        source.subscribe(new DoOnEvent(observer));
+    }
+
+    final class DoOnEvent implements SingleObserver<T> {
+        private final SingleObserver<? super T> downstream;
+
+        DoOnEvent(SingleObserver<? super T> observer) {
+            this.downstream = observer;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            downstream.onSubscribe(d);
+        }
+
+        @Override
+        public void onSuccess(T value) {
+            try {
+                onEvent.accept(value, null);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                downstream.onError(ex);
+                return;
             }
 
-            @Override
-            public void onSuccess(T value) {
-                try {
-                    onEvent.accept(value, null);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    s.onError(ex);
-                    return;
-                }
+            downstream.onSuccess(value);
+        }
 
-                s.onSuccess(value);
+        @Override
+        public void onError(Throwable e) {
+            try {
+                onEvent.accept(null, e);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                e = new CompositeException(e, ex);
             }
-
-            @Override
-            public void onError(Throwable e) {
-                try {
-                    onEvent.accept(null, e);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    e = new CompositeException(e, ex);
-                }
-                s.onError(e);
-            }
-        });
+            downstream.onError(e);
+        }
     }
 }

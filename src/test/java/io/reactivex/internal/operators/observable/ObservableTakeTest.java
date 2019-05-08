@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,9 +14,10 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.util.Arrays;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.*;
 
@@ -24,10 +25,13 @@ import org.junit.*;
 import org.mockito.InOrder;
 
 import io.reactivex.*;
+import io.reactivex.Observable;
+import io.reactivex.Observer;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.PublishSubject;
 
@@ -204,13 +208,13 @@ public class ObservableTakeTest {
         Observable.unsafeCreate(new ObservableSource<Integer>() {
 
             @Override
-            public void subscribe(Observer<? super Integer> s) {
+            public void subscribe(Observer<? super Integer> observer) {
                 Disposable bs = Disposables.empty();
-                s.onSubscribe(bs);
+                observer.onSubscribe(bs);
                 for (int i = 0; !bs.isDisposed(); i++) {
                     System.out.println("Emit: " + i);
                     count.incrementAndGet();
-                    s.onNext(i);
+                    observer.onNext(i);
                 }
             }
 
@@ -281,12 +285,12 @@ public class ObservableTakeTest {
     @Test(timeout = 2000)
     public void testTakeObserveOn() {
         Observer<Object> o = TestHelper.mockObserver();
-        TestObserver<Object> ts = new TestObserver<Object>(o);
+        TestObserver<Object> to = new TestObserver<Object>(o);
 
         INFINITE_OBSERVABLE
-        .observeOn(Schedulers.newThread()).take(1).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+        .observeOn(Schedulers.newThread()).take(1).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
 
         verify(o).onNext(1L);
         verify(o, never()).onNext(2L);
@@ -323,38 +327,38 @@ public class ObservableTakeTest {
     public void takeFinalValueThrows() {
         Observable<Integer> source = Observable.just(1).take(1);
 
-        TestObserver<Integer> ts = new TestObserver<Integer>() {
+        TestObserver<Integer> to = new TestObserver<Integer>() {
             @Override
             public void onNext(Integer t) {
                 throw new TestException();
             }
         };
 
-        source.safeSubscribe(ts);
+        source.safeSubscribe(to);
 
-        ts.assertNoValues();
-        ts.assertError(TestException.class);
-        ts.assertNotComplete();
+        to.assertNoValues();
+        to.assertError(TestException.class);
+        to.assertNotComplete();
     }
 
     @Test
     public void testReentrantTake() {
         final PublishSubject<Integer> source = PublishSubject.create();
 
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
 
         source.take(1).doOnNext(new Consumer<Integer>() {
             @Override
             public void accept(Integer v) {
                 source.onNext(2);
             }
-        }).subscribe(ts);
+        }).subscribe(to);
 
         source.onNext(1);
 
-        ts.assertValue(1);
-        ts.assertNoErrors();
-        ts.assertComplete();
+        to.assertValue(1);
+        to.assertNoErrors();
+        to.assertComplete();
     }
 
     @Test
@@ -364,6 +368,44 @@ public class ObservableTakeTest {
             fail("Should have thrown");
         } catch (IllegalArgumentException ex) {
             assertEquals("count >= 0 required but it was -99", ex.getMessage());
+        }
+    }
+
+    @Test
+    public void takeZero() {
+        Observable.just(1)
+        .take(0)
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishSubject.create().take(2));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.take(2);
+            }
+        });
+    }
+
+    @Test
+    public void errorAfterLimitReached() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Observable.error(new TestException())
+            .take(0)
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
         }
     }
 }

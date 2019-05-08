@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,17 +13,15 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.*;
-
-import org.reactivestreams.*;
+import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
-import io.reactivex.internal.subscriptions.SubscriptionHelper;
-import io.reactivex.internal.util.BackpressureHelper;
+import io.reactivex.internal.subscribers.SinglePostCompleteSubscriber;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableMaterialize<T> extends AbstractFlowableWithUpstream<T, Notification<T>> {
 
-    public FlowableMaterialize(Publisher<T> source) {
+    public FlowableMaterialize(Flowable<T> source) {
         super(source);
     }
 
@@ -32,126 +30,35 @@ public final class FlowableMaterialize<T> extends AbstractFlowableWithUpstream<T
         source.subscribe(new MaterializeSubscriber<T>(s));
     }
 
-    // FIXME needs post-complete drain management
-    static final class MaterializeSubscriber<T> extends AtomicLong implements Subscriber<T>, Subscription {
+    static final class MaterializeSubscriber<T> extends SinglePostCompleteSubscriber<T, Notification<T>> {
 
         private static final long serialVersionUID = -3740826063558713822L;
-        final Subscriber<? super Notification<T>> actual;
 
-        Subscription s;
-
-        final AtomicInteger state = new AtomicInteger();
-
-        Notification<T> value;
-
-        volatile boolean done;
-
-        static final int NO_REQUEST_NO_VALUE = 0;
-        static final int NO_REQUEST_HAS_VALUE = 1;
-        static final int HAS_REQUEST_NO_VALUE = 2;
-        static final int HAS_REQUEST_HAS_VALUE = 3;
-
-        MaterializeSubscriber(Subscriber<? super Notification<T>> actual) {
-            this.actual = actual;
-        }
-
-        @Override
-        public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
-            }
+        MaterializeSubscriber(Subscriber<? super Notification<T>> downstream) {
+            super(downstream);
         }
 
         @Override
         public void onNext(T t) {
-            actual.onNext(Notification.createOnNext(t));
-
-            if (get() != Long.MAX_VALUE) {
-                decrementAndGet();
-            }
-        }
-
-        void tryEmit(Notification<T> v) {
-            if (get() != 0L) {
-                state.lazySet(HAS_REQUEST_HAS_VALUE);
-                actual.onNext(v);
-                actual.onComplete();
-            } else {
-                for (;;) {
-                    int s = state.get();
-                    if (s == HAS_REQUEST_NO_VALUE) {
-                        if (state.compareAndSet(s, HAS_REQUEST_HAS_VALUE)) {
-                            actual.onNext(v);
-                            actual.onComplete();
-                            return;
-                        }
-                    } else
-                    if (s == NO_REQUEST_HAS_VALUE) {
-                        return;
-                    } else
-                    if (s == HAS_REQUEST_HAS_VALUE) {
-                        value = null;
-                        return;
-                    } else {
-                        value = v;
-                        done = true;
-                        if (state.compareAndSet(s, NO_REQUEST_HAS_VALUE)) {
-                            return;
-                        }
-                    }
-                }
-            }
+            produced++;
+            downstream.onNext(Notification.createOnNext(t));
         }
 
         @Override
         public void onError(Throwable t) {
-            Notification<T> v = Notification.createOnError(t);
-
-            tryEmit(v);
+            complete(Notification.<T>createOnError(t));
         }
 
         @Override
         public void onComplete() {
-            Notification<T> v = Notification.createOnComplete();
-
-            tryEmit(v);
+            complete(Notification.<T>createOnComplete());
         }
 
         @Override
-        public void request(long n) {
-            if (!SubscriptionHelper.validate(n)) {
-                return;
+        protected void onDrop(Notification<T> n) {
+            if (n.isOnError()) {
+                RxJavaPlugins.onError(n.getError());
             }
-            BackpressureHelper.add(this, n);
-            if (done) {
-                for (;;) {
-                    int s = state.get();
-                    if (s == NO_REQUEST_HAS_VALUE) {
-                        if (state.compareAndSet(s, HAS_REQUEST_HAS_VALUE)) {
-                            Notification<T> v = value;
-                            value = null;
-                            actual.onNext(v);
-                            actual.onComplete();
-                            return;
-                        }
-                    } else
-                    if (s == HAS_REQUEST_NO_VALUE || s == HAS_REQUEST_HAS_VALUE) {
-                        return;
-                    } else
-                    if (state.compareAndSet(s, HAS_REQUEST_NO_VALUE)) {
-                        return;
-                    }
-                }
-            } else {
-                s.request(n);
-            }
-        }
-
-        @Override
-        public void cancel() {
-            state.lazySet(HAS_REQUEST_HAS_VALUE);
-            s.cancel();
         }
     }
 }

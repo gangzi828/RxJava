@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
+import io.reactivex.exceptions.MissingBackpressureException;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 import io.reactivex.subscribers.SerializedSubscriber;
@@ -26,40 +27,47 @@ public final class FlowableSamplePublisher<T> extends Flowable<T> {
     final Publisher<T> source;
     final Publisher<?> other;
 
-    public FlowableSamplePublisher(Publisher<T> source, Publisher<?> other) {
+    final boolean emitLast;
+
+    public FlowableSamplePublisher(Publisher<T> source, Publisher<?> other, boolean emitLast) {
         this.source = source;
         this.other = other;
+        this.emitLast = emitLast;
     }
 
     @Override
     protected void subscribeActual(Subscriber<? super T> s) {
         SerializedSubscriber<T> serial = new SerializedSubscriber<T>(s);
-        source.subscribe(new SamplePublisherSubscriber<T>(serial, other));
+        if (emitLast) {
+            source.subscribe(new SampleMainEmitLast<T>(serial, other));
+        } else {
+            source.subscribe(new SampleMainNoLast<T>(serial, other));
+        }
     }
 
-    static final class SamplePublisherSubscriber<T> extends AtomicReference<T> implements Subscriber<T>, Subscription {
+    abstract static class SamplePublisherSubscriber<T> extends AtomicReference<T> implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -3517602651313910099L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final Publisher<?> sampler;
 
         final AtomicLong requested = new AtomicLong();
 
         final AtomicReference<Subscription> other = new AtomicReference<Subscription>();
 
-        Subscription s;
+        Subscription upstream;
 
         SamplePublisherSubscriber(Subscriber<? super T> actual, Publisher<?> other) {
-            this.actual = actual;
+            this.downstream = actual;
             this.sampler = other;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 if (other.get() == null) {
                     sampler.subscribe(new SamplerSubscriber<T>(this));
                     s.request(Long.MAX_VALUE);
@@ -76,23 +84,17 @@ public final class FlowableSamplePublisher<T> extends Flowable<T> {
         @Override
         public void onError(Throwable t) {
             SubscriptionHelper.cancel(other);
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             SubscriptionHelper.cancel(other);
-            actual.onComplete();
+            completion();
         }
 
-        boolean setOther(Subscription o) {
-            if (other.get() == null) {
-                if (other.compareAndSet(null, o)) {
-                    return true;
-                }
-                o.cancel();
-            }
-            return false;
+        void setOther(Subscription o) {
+            SubscriptionHelper.setOnce(other, o, Long.MAX_VALUE);
         }
 
         @Override
@@ -105,37 +107,39 @@ public final class FlowableSamplePublisher<T> extends Flowable<T> {
         @Override
         public void cancel() {
             SubscriptionHelper.cancel(other);
-            s.cancel();
+            upstream.cancel();
         }
 
         public void error(Throwable e) {
-            cancel();
-            actual.onError(e);
+            upstream.cancel();
+            downstream.onError(e);
         }
 
         public void complete() {
-            cancel();
-            actual.onComplete();
+            upstream.cancel();
+            completion();
         }
 
-        public void emit() {
+        void emit() {
             T value = getAndSet(null);
             if (value != null) {
                 long r = requested.get();
                 if (r != 0L) {
-                    actual.onNext(value);
-                    if (r != Long.MAX_VALUE) {
-                        requested.decrementAndGet();
-                    }
+                    downstream.onNext(value);
+                    BackpressureHelper.produced(requested, 1);
                 } else {
                     cancel();
-                    actual.onError(new IllegalStateException("Couldn't emit value due to lack of requests!"));
+                    downstream.onError(new MissingBackpressureException("Couldn't emit value due to lack of requests!"));
                 }
             }
         }
+
+        abstract void completion();
+
+        abstract void run();
     }
 
-    static final class SamplerSubscriber<T> implements Subscriber<Object> {
+    static final class SamplerSubscriber<T> implements FlowableSubscriber<Object> {
         final SamplePublisherSubscriber<T> parent;
         SamplerSubscriber(SamplePublisherSubscriber<T> parent) {
             this.parent = parent;
@@ -144,14 +148,12 @@ public final class FlowableSamplePublisher<T> extends Flowable<T> {
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (parent.setOther(s)) {
-                s.request(Long.MAX_VALUE);
-            }
+            parent.setOther(s);
         }
 
         @Override
         public void onNext(Object t) {
-            parent.emit();
+            parent.run();
         }
 
         @Override
@@ -162,6 +164,62 @@ public final class FlowableSamplePublisher<T> extends Flowable<T> {
         @Override
         public void onComplete() {
             parent.complete();
+        }
+    }
+
+    static final class SampleMainNoLast<T> extends SamplePublisherSubscriber<T> {
+
+        private static final long serialVersionUID = -3029755663834015785L;
+
+        SampleMainNoLast(Subscriber<? super T> actual, Publisher<?> other) {
+            super(actual, other);
+        }
+
+        @Override
+        void completion() {
+            downstream.onComplete();
+        }
+
+        @Override
+        void run() {
+            emit();
+        }
+    }
+
+    static final class SampleMainEmitLast<T> extends SamplePublisherSubscriber<T> {
+
+        private static final long serialVersionUID = -3029755663834015785L;
+
+        final AtomicInteger wip;
+
+        volatile boolean done;
+
+        SampleMainEmitLast(Subscriber<? super T> actual, Publisher<?> other) {
+            super(actual, other);
+            this.wip = new AtomicInteger();
+        }
+
+        @Override
+        void completion() {
+            done = true;
+            if (wip.getAndIncrement() == 0) {
+                emit();
+                downstream.onComplete();
+            }
+        }
+
+        @Override
+        void run() {
+            if (wip.getAndIncrement() == 0) {
+                do {
+                    boolean d = done;
+                    emit();
+                    if (d) {
+                        downstream.onComplete();
+                        return;
+                    }
+                } while (wip.decrementAndGet() != 0);
+            }
         }
     }
 }

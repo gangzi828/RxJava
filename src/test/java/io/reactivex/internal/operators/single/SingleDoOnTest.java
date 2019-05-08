@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,7 +20,7 @@ import java.util.List;
 import org.junit.Test;
 
 import io.reactivex.*;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
@@ -94,7 +94,7 @@ public class SingleDoOnTest {
 
         Single.just(1).doOnSubscribe(new Consumer<Disposable>() {
             @Override
-            public void accept(Disposable s) throws Exception {
+            public void accept(Disposable d) throws Exception {
                 count[0]++;
             }
         })
@@ -110,7 +110,7 @@ public class SingleDoOnTest {
 
         Single.error(new TestException()).doOnSubscribe(new Consumer<Disposable>() {
             @Override
-            public void accept(Disposable s) throws Exception {
+            public void accept(Disposable d) throws Exception {
                 count[0]++;
             }
         })
@@ -125,7 +125,7 @@ public class SingleDoOnTest {
 
         Single.just(1).doOnSubscribe(new Consumer<Disposable>() {
             @Override
-            public void accept(Disposable s) throws Exception {
+            public void accept(Disposable d) throws Exception {
                 throw new TestException();
             }
         })
@@ -140,14 +140,14 @@ public class SingleDoOnTest {
         try {
             Single.error(new TestException("Outer")).doOnSubscribe(new Consumer<Disposable>() {
                 @Override
-                public void accept(Disposable s) throws Exception {
+                public void accept(Disposable d) throws Exception {
                     throw new TestException("Inner");
                 }
             })
             .test()
             .assertFailureAndMessage(TestException.class, "Inner");
 
-            TestHelper.assertError(errors, 0, TestException.class, "Outer");
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Outer");
         } finally {
             RxJavaPlugins.reset();
         }
@@ -292,7 +292,7 @@ public class SingleDoOnTest {
             .test()
             .cancel();
 
-            TestHelper.assertError(errors, 0, TestException.class);
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -326,5 +326,36 @@ public class SingleDoOnTest {
         })
         .test()
         .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void onSubscribeCrash() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            final Disposable bs = Disposables.empty();
+
+            new Single<Integer>() {
+                @Override
+                protected void subscribeActual(SingleObserver<? super Integer> observer) {
+                    observer.onSubscribe(bs);
+                    observer.onError(new TestException("Second"));
+                    observer.onSuccess(1);
+                }
+            }
+            .doOnSubscribe(new Consumer<Disposable>() {
+                @Override
+                public void accept(Disposable d) throws Exception {
+                    throw new TestException("First");
+                }
+            })
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            assertTrue(bs.isDisposed());
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

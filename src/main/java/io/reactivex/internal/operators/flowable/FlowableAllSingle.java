@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,18 +24,18 @@ import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableAllSingle<T> extends Single<Boolean> implements FuseToFlowable<Boolean> {
 
-    final Publisher<T> source;
+    final Flowable<T> source;
 
     final Predicate<? super T> predicate;
 
-    public FlowableAllSingle(Publisher<T> source, Predicate<? super T> predicate) {
+    public FlowableAllSingle(Flowable<T> source, Predicate<? super T> predicate) {
         this.source = source;
         this.predicate = predicate;
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super Boolean> s) {
-        source.subscribe(new AllSubscriber<T>(s, predicate));
+    protected void subscribeActual(SingleObserver<? super Boolean> observer) {
+        source.subscribe(new AllSubscriber<T>(observer, predicate));
     }
 
     @Override
@@ -43,25 +43,26 @@ public final class FlowableAllSingle<T> extends Single<Boolean> implements FuseT
         return RxJavaPlugins.onAssembly(new FlowableAll<T>(source, predicate));
     }
 
-    static final class AllSubscriber<T> implements Subscriber<T>, Disposable {
+    static final class AllSubscriber<T> implements FlowableSubscriber<T>, Disposable {
 
-        final SingleObserver<? super Boolean> actual;
+        final SingleObserver<? super Boolean> downstream;
 
         final Predicate<? super T> predicate;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         AllSubscriber(SingleObserver<? super Boolean> actual, Predicate<? super T> predicate) {
-            this.actual = actual;
+            this.downstream = actual;
             this.predicate = predicate;
         }
+
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -76,16 +77,16 @@ public final class FlowableAllSingle<T> extends Single<Boolean> implements FuseT
                 b = predicate.test(t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
-                s = SubscriptionHelper.CANCELLED;
+                upstream.cancel();
+                upstream = SubscriptionHelper.CANCELLED;
                 onError(e);
                 return;
             }
             if (!b) {
                 done = true;
-                s.cancel();
-                s = SubscriptionHelper.CANCELLED;
-                actual.onSuccess(false);
+                upstream.cancel();
+                upstream = SubscriptionHelper.CANCELLED;
+                downstream.onSuccess(false);
             }
         }
 
@@ -96,8 +97,8 @@ public final class FlowableAllSingle<T> extends Single<Boolean> implements FuseT
                 return;
             }
             done = true;
-            s = SubscriptionHelper.CANCELLED;
-            actual.onError(t);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onError(t);
         }
 
         @Override
@@ -106,20 +107,20 @@ public final class FlowableAllSingle<T> extends Single<Boolean> implements FuseT
                 return;
             }
             done = true;
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
 
-            actual.onSuccess(true);
+            downstream.onSuccess(true);
         }
 
         @Override
         public void dispose() {
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public boolean isDisposed() {
-            return s == SubscriptionHelper.CANCELLED;
+            return upstream == SubscriptionHelper.CANCELLED;
         }
     }
 }

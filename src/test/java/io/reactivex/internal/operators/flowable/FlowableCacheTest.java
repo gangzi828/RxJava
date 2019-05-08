@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,17 +23,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.*;
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.processors.PublishProcessor;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableCacheTest {
     @Test
     public void testColdReplayNoBackpressure() {
-        FlowableCache<Integer> source = (FlowableCache<Integer>)FlowableCache.from(Flowable.range(0, 1000));
+        FlowableCache<Integer> source = new FlowableCache<Integer>(Flowable.range(0, 1000), 16);
 
         assertFalse("Source is connected!", source.isConnected());
 
@@ -53,9 +54,10 @@ public class FlowableCacheTest {
             assertEquals((Integer)i, onNextEvents.get(i));
         }
     }
+
     @Test
     public void testColdReplayBackpressure() {
-        FlowableCache<Integer> source = (FlowableCache<Integer>)FlowableCache.from(Flowable.range(0, 1000));
+        FlowableCache<Integer> source = new FlowableCache<Integer>(Flowable.range(0, 1000), 16);
 
         assertFalse("Source is connected!", source.isConnected());
 
@@ -65,7 +67,7 @@ public class FlowableCacheTest {
         source.subscribe(ts);
 
         assertTrue("Source is not connected!", source.isConnected());
-        assertTrue("Subscribers not retained!", source.hasSubscribers());
+        assertFalse("Subscribers retained!", source.hasSubscribers());
 
         ts.assertNoErrors();
         ts.assertNotComplete();
@@ -83,19 +85,19 @@ public class FlowableCacheTest {
     @Test
     public void testCache() throws InterruptedException {
         final AtomicInteger counter = new AtomicInteger();
-        Flowable<String> o = Flowable.unsafeCreate(new Publisher<String>() {
+        Flowable<String> f = Flowable.unsafeCreate(new Publisher<String>() {
 
             @Override
-            public void subscribe(final Subscriber<? super String> observer) {
-                observer.onSubscribe(new BooleanSubscription());
+            public void subscribe(final Subscriber<? super String> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
                 new Thread(new Runnable() {
 
                     @Override
                     public void run() {
                         counter.incrementAndGet();
                         System.out.println("published observable being executed");
-                        observer.onNext("one");
-                        observer.onComplete();
+                        subscriber.onNext("one");
+                        subscriber.onComplete();
                     }
                 }).start();
             }
@@ -105,7 +107,7 @@ public class FlowableCacheTest {
         final CountDownLatch latch = new CountDownLatch(2);
 
         // subscribe once
-        o.subscribe(new Consumer<String>() {
+        f.subscribe(new Consumer<String>() {
             @Override
             public void accept(String v) {
                     assertEquals("one", v);
@@ -115,7 +117,7 @@ public class FlowableCacheTest {
         });
 
         // subscribe again
-        o.subscribe(new Consumer<String>() {
+        f.subscribe(new Consumer<String>() {
             @Override
             public void accept(String v) {
                     assertEquals("one", v);
@@ -133,24 +135,23 @@ public class FlowableCacheTest {
     @Test
     public void testUnsubscribeSource() throws Exception {
         Action unsubscribe = mock(Action.class);
-        Flowable<Integer> o = Flowable.just(1).doOnCancel(unsubscribe).cache();
-        o.subscribe();
-        o.subscribe();
-        o.subscribe();
-        verify(unsubscribe, times(1)).run();
+        Flowable<Integer> f = Flowable.just(1).doOnCancel(unsubscribe).cache();
+        f.subscribe();
+        f.subscribe();
+        f.subscribe();
+        verify(unsubscribe, never()).run();
     }
 
     @Test
     public void testTake() {
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
 
-        FlowableCache<Integer> cached = (FlowableCache<Integer>)FlowableCache.from(Flowable.range(1, 100));
+        FlowableCache<Integer> cached = new FlowableCache<Integer>(Flowable.range(1, 100), 16);
         cached.take(10).subscribe(ts);
 
         ts.assertNoErrors();
         ts.assertComplete();
         ts.assertValues(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-//        ts.assertUnsubscribed(); // FIXME no longer valid
         assertFalse(cached.hasSubscribers());
     }
 
@@ -160,7 +161,7 @@ public class FlowableCacheTest {
         for (int i = 0; i < 100; i++) {
             TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
 
-            FlowableCache<Integer> cached = (FlowableCache<Integer>)FlowableCache.from(source);
+            FlowableCache<Integer> cached = new FlowableCache<Integer>(source, 16);
 
             cached.observeOn(Schedulers.computation()).subscribe(ts1);
 
@@ -178,12 +179,13 @@ public class FlowableCacheTest {
             assertEquals(10000, ts2.values().size());
         }
     }
+
     @Test
     public void testAsyncComeAndGo() {
         Flowable<Long> source = Flowable.interval(1, 1, TimeUnit.MILLISECONDS)
                 .take(1000)
                 .subscribeOn(Schedulers.io());
-        FlowableCache<Long> cached = (FlowableCache<Long>)FlowableCache.from(source);
+        FlowableCache<Long> cached = new FlowableCache<Long>(source, 16);
 
         Flowable<Long> output = cached.observeOn(Schedulers.computation());
 
@@ -244,7 +246,6 @@ public class FlowableCacheTest {
                 .concatWith(Flowable.<Integer>error(new TestException()))
                 .cache();
 
-
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
         source.subscribe(ts);
 
@@ -261,6 +262,7 @@ public class FlowableCacheTest {
     }
 
     @Test
+    @Ignore("RS subscribers should not throw")
     public void unsafeChildThrows() {
         final AtomicInteger count = new AtomicInteger();
 
@@ -287,5 +289,255 @@ public class FlowableCacheTest {
         ts.assertNoValues();
         ts.assertNotComplete();
         ts.assertError(TestException.class);
+    }
+
+    @Test
+    public void take() {
+        Flowable<Integer> cache = Flowable.range(1, 5).cache();
+
+        cache.take(2).test().assertResult(1, 2);
+        cache.take(3).test().assertResult(1, 2, 3);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.range(1, 5).cache());
+    }
+
+    @Test
+    public void disposeOnArrival2() {
+        Flowable<Integer> f = PublishProcessor.<Integer>create().cache();
+
+        f.test();
+
+        f.test(0L, true)
+        .assertEmpty();
+    }
+
+    @Test
+    public void subscribeEmitRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishProcessor<Integer> pp = PublishProcessor.<Integer>create();
+
+            final Flowable<Integer> cache = pp.cache();
+
+            cache.test();
+
+            final TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cache.subscribe(ts);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    for (int j = 0; j < 500; j++) {
+                        pp.onNext(j);
+                    }
+                    pp.onComplete();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            ts
+            .awaitDone(5, TimeUnit.SECONDS)
+            .assertSubscribed().assertValueCount(500).assertComplete().assertNoErrors();
+        }
+    }
+
+    @Test
+    public void observers() {
+        PublishProcessor<Integer> pp = PublishProcessor.create();
+        FlowableCache<Integer> cache = (FlowableCache<Integer>)Flowable.range(1, 5).concatWith(pp).cache();
+
+        assertFalse(cache.hasSubscribers());
+
+        assertEquals(0, cache.cachedEventCount());
+
+        TestSubscriber<Integer> ts = cache.test();
+
+        assertTrue(cache.hasSubscribers());
+
+        assertEquals(5, cache.cachedEventCount());
+
+        pp.onComplete();
+
+        ts.assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void disposeOnArrival() {
+        Flowable.range(1, 5).cache()
+        .test(0L, true)
+        .assertEmpty();
+    }
+
+    @Test
+    public void badSource() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Object>, Object>() {
+            @Override
+            public Object apply(Flowable<Object> f) throws Exception {
+                return f.cache();
+            }
+        }, false, 1, 1, 1);
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.never().cache());
+    }
+
+    @Test
+    public void take1() {
+        Flowable<Integer> cache = Flowable.just(1, 2)
+        .cache();
+
+        cache.test();
+
+        cache
+        .take(1)
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void empty() {
+        Flowable.empty()
+        .cache()
+        .test(0L)
+        .assertResult();
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .cache()
+        .test(0L)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void cancelledUpFrontConnectAnyway() {
+        final AtomicInteger call = new AtomicInteger();
+        Flowable.fromCallable(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return call.incrementAndGet();
+            }
+        })
+        .cache()
+        .test(1L, true)
+        .assertNoValues();
+
+        assertEquals(1, call.get());
+    }
+
+    @Test
+    public void cancelledUpFront() {
+        final AtomicInteger call = new AtomicInteger();
+        Flowable<Object> f = Flowable.fromCallable(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return call.incrementAndGet();
+            }
+        }).concatWith(Flowable.never())
+        .cache();
+
+        f.test().assertValuesOnly(1);
+
+        f.test(1L, true)
+        .assertEmpty();
+
+        assertEquals(1, call.get());
+    }
+
+    @Test
+    public void subscribeSubscribeRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final Flowable<Integer> cache = Flowable.range(1, 500).cache();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+            final TestSubscriber<Integer> ts2 = new TestSubscriber<Integer>();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cache.subscribe(ts1);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    cache.subscribe(ts2);
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            ts1
+            .awaitDone(5, TimeUnit.SECONDS)
+            .assertSubscribed()
+            .assertValueCount(500)
+            .assertComplete()
+            .assertNoErrors();
+
+            ts2
+            .awaitDone(5, TimeUnit.SECONDS)
+            .assertSubscribed()
+            .assertValueCount(500)
+            .assertComplete()
+            .assertNoErrors();
+        }
+    }
+
+    @Test
+    public void subscribeCompleteRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishProcessor<Integer> pp = PublishProcessor.<Integer>create();
+
+            final Flowable<Integer> cache = pp.cache();
+
+            cache.test();
+
+            final TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cache.subscribe(ts);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    pp.onComplete();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+
+            ts
+            .awaitDone(5, TimeUnit.SECONDS)
+            .assertResult();
+        }
+    }
+
+    @Test
+    public void backpressure() {
+        Flowable.range(1, 5)
+        .cache()
+        .test(0)
+        .assertEmpty()
+        .requestMore(2)
+        .assertValuesOnly(1, 2)
+        .requestMore(3)
+        .assertResult(1, 2, 3, 4, 5);
     }
 }

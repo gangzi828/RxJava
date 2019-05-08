@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,7 +22,6 @@ import java.util.concurrent.atomic.AtomicReference;
  * Watch out for the leaked AtomicReference methods!
  */
 public final class AtomicThrowable extends AtomicReference<Throwable> {
-
 
     private static final long serialVersionUID = 3949248817947090603L;
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,8 @@ import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class ObservableScan<T> extends AbstractObservableWithUpstream<T, T> {
     final BiFunction<T, T, T> accumulator;
@@ -32,41 +34,44 @@ public final class ObservableScan<T> extends AbstractObservableWithUpstream<T, T
     }
 
     static final class ScanObserver<T> implements Observer<T>, Disposable {
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final BiFunction<T, T, T> accumulator;
 
-        Disposable s;
+        Disposable upstream;
 
         T value;
 
+        boolean done;
+
         ScanObserver(Observer<? super T> actual, BiFunction<T, T, T> accumulator) {
-            this.actual = actual;
+            this.downstream = actual;
             this.accumulator = accumulator;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
-            final Observer<? super T> a = actual;
+            if (done) {
+                return;
+            }
+            final Observer<? super T> a = downstream;
             T v = value;
             if (v == null) {
                 value = t;
@@ -75,17 +80,11 @@ public final class ObservableScan<T> extends AbstractObservableWithUpstream<T, T
                 T u;
 
                 try {
-                    u = accumulator.apply(v, t);
+                    u = ObjectHelper.requireNonNull(accumulator.apply(v, t), "The value returned by the accumulator is null");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
-                    s.dispose();
-                    a.onError(e);
-                    return;
-                }
-
-                if (u == null) {
-                    s.dispose();
-                    a.onError(new NullPointerException("The value returned by the accumulator is null"));
+                    upstream.dispose();
+                    onError(e);
                     return;
                 }
 
@@ -96,12 +95,21 @@ public final class ObservableScan<T> extends AbstractObservableWithUpstream<T, T
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            if (done) {
+                RxJavaPlugins.onError(t);
+                return;
+            }
+            done = true;
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            if (done) {
+                return;
+            }
+            done = true;
+            downstream.onComplete();
         }
     }
 }

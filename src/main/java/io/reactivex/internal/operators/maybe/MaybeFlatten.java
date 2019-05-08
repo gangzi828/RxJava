@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -46,25 +46,24 @@ public final class MaybeFlatten<T, R> extends AbstractMaybeWithUpstream<T, R> {
     extends AtomicReference<Disposable>
     implements MaybeObserver<T>, Disposable {
 
-
         private static final long serialVersionUID = 4375739915521278546L;
 
-        final MaybeObserver<? super R> actual;
+        final MaybeObserver<? super R> downstream;
 
         final Function<? super T, ? extends MaybeSource<? extends R>> mapper;
 
-        Disposable d;
+        Disposable upstream;
 
         FlatMapMaybeObserver(MaybeObserver<? super R> actual,
                 Function<? super T, ? extends MaybeSource<? extends R>> mapper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
         }
 
         @Override
         public void dispose() {
             DisposableHelper.dispose(this);
-            d.dispose();
+            upstream.dispose();
         }
 
         @Override
@@ -74,10 +73,10 @@ public final class MaybeFlatten<T, R> extends AbstractMaybeWithUpstream<T, R> {
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -89,21 +88,23 @@ public final class MaybeFlatten<T, R> extends AbstractMaybeWithUpstream<T, R> {
                 source = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null MaybeSource");
             } catch (Exception ex) {
                 Exceptions.throwIfFatal(ex);
-                actual.onError(ex);
+                downstream.onError(ex);
                 return;
             }
 
-            source.subscribe(new InnerObserver());
+            if (!isDisposed()) {
+                source.subscribe(new InnerObserver());
+            }
         }
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         final class InnerObserver implements MaybeObserver<R> {
@@ -115,17 +116,17 @@ public final class MaybeFlatten<T, R> extends AbstractMaybeWithUpstream<T, R> {
 
             @Override
             public void onSuccess(R value) {
-                actual.onSuccess(value);
+                downstream.onSuccess(value);
             }
 
             @Override
             public void onError(Throwable e) {
-                actual.onError(e);
+                downstream.onError(e);
             }
 
             @Override
             public void onComplete() {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
     }

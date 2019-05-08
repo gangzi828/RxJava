@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,7 +24,7 @@ import org.reactivestreams.*;
 import io.reactivex.Flowable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
-import io.reactivex.internal.fuseable.QueueSubscription;
+import io.reactivex.internal.fuseable.QueueFuseable;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.*;
@@ -144,8 +144,6 @@ public class FlowableOnBackpressureBufferTest {
         int size = ts.values().size();
         assertTrue(size <= 150);  // will get up to 50 more
         assertTrue(ts.values().get(size - 1) == size - 1);
-        // FIXME no longer assertable
-//        assertTrue(s.isUnsubscribed());
     }
 
     static final Flowable<Long> infinite = Flowable.unsafeCreate(new Publisher<Long>() {
@@ -251,23 +249,23 @@ public class FlowableOnBackpressureBufferTest {
 
     @Test
     public void fusedNormal() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         Flowable.range(1, 10).onBackpressureBuffer().subscribe(ts);
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-          .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.ASYNC))
+          .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.ASYNC))
           .assertResult(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
     }
 
     @Test
     public void fusedError() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         Flowable.<Integer>error(new TestException()).onBackpressureBuffer().subscribe(ts);
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-          .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.ASYNC))
+          .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.ASYNC))
           .assertFailure(TestException.class);
     }
 
@@ -290,5 +288,23 @@ public class FlowableOnBackpressureBufferTest {
         .assertValueCount(1000 * 1000)
         .assertNoErrors()
         .assertComplete();
+    }
+
+    @Test
+    public void emptyDelayError() {
+        Flowable.empty()
+        .onBackpressureBuffer(true)
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void fusionRejected() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.SYNC);
+
+        Flowable.<Integer>never().onBackpressureBuffer().subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.NONE)
+        .assertEmpty();
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -11,6 +11,8 @@
  * the License for the specific language governing permissions and limitations under the License.
  */
 package io.reactivex;
+
+import io.reactivex.annotations.*;
 
 /**
  * Represents a basic, non-backpressured {@link Observable} source base interface,
@@ -26,5 +28,5 @@ public interface ObservableSource<T> {
      * @param observer the Observer, not null
      * @throws NullPointerException if {@code observer} is null
      */
-    void subscribe(Observer<? super T> observer);
+    void subscribe(@NonNull Observer<? super T> observer);
 }

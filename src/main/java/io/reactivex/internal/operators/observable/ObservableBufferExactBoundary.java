@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.Collection;
 import java.util.concurrent.Callable;
 
@@ -47,7 +48,7 @@ extends AbstractObservableWithUpstream<T, U> {
         final Callable<U> bufferSupplier;
         final ObservableSource<B> boundary;
 
-        Disposable s;
+        Disposable upstream;
 
         Disposable other;
 
@@ -61,34 +62,28 @@ extends AbstractObservableWithUpstream<T, U> {
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
                 U b;
 
                 try {
-                    b = bufferSupplier.call();
+                    b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The buffer supplied is null");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
                     cancelled = true;
-                    s.dispose();
-                    EmptyDisposable.error(e, actual);
+                    d.dispose();
+                    EmptyDisposable.error(e, downstream);
                     return;
                 }
 
-                if (b == null) {
-                    cancelled = true;
-                    s.dispose();
-                    EmptyDisposable.error(new NullPointerException("The buffer supplied is null"), actual);
-                    return;
-                }
                 buffer = b;
 
                 BufferBoundaryObserver<T, U, B> bs = new BufferBoundaryObserver<T, U, B>(this);
                 other = bs;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 if (!cancelled) {
                     boundary.subscribe(bs);
@@ -110,7 +105,7 @@ extends AbstractObservableWithUpstream<T, U> {
         @Override
         public void onError(Throwable t) {
             dispose();
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -126,7 +121,7 @@ extends AbstractObservableWithUpstream<T, U> {
             queue.offer(b);
             done = true;
             if (enter()) {
-                QueueDrainHelper.drainLoop(queue, actual, false, this, this);
+                QueueDrainHelper.drainLoop(queue, downstream, false, this, this);
             }
         }
 
@@ -135,7 +130,7 @@ extends AbstractObservableWithUpstream<T, U> {
             if (!cancelled) {
                 cancelled = true;
                 other.dispose();
-                s.dispose();
+                upstream.dispose();
 
                 if (enter()) {
                     queue.clear();
@@ -153,17 +148,11 @@ extends AbstractObservableWithUpstream<T, U> {
             U next;
 
             try {
-                next = bufferSupplier.call();
+                next = ObjectHelper.requireNonNull(bufferSupplier.call(), "The buffer supplied is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 dispose();
-                actual.onError(e);
-                return;
-            }
-
-            if (next == null) {
-                dispose();
-                actual.onError(new NullPointerException("The buffer supplied is null"));
+                downstream.onError(e);
                 return;
             }
 
@@ -181,7 +170,7 @@ extends AbstractObservableWithUpstream<T, U> {
 
         @Override
         public void accept(Observer<? super U> a, U v) {
-            actual.onNext(v);
+            downstream.onNext(v);
         }
 
     }

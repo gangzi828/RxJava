@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,9 +13,15 @@
 
 package io.reactivex.internal.operators.single;
 
+import static org.junit.Assert.assertTrue;
+
+import java.util.*;
+
 import org.junit.Test;
 
-import io.reactivex.Single;
+import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public class SingleMergeTest {
 
@@ -48,4 +54,86 @@ public class SingleMergeTest {
         .assertResult(1, 2, 3, 4);
     }
 
+    @Test
+    public void mergeErrors() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Single<Integer> source1 = Single.error(new TestException("First"));
+            Single<Integer> source2 = Single.error(new TestException("Second"));
+
+            Single.merge(source1, source2)
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            assertTrue(errors.toString(), errors.isEmpty());
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void mergeDelayErrorIterable() {
+        Single.mergeDelayError(Arrays.asList(
+                Single.just(1),
+                Single.<Integer>error(new TestException()),
+                Single.just(2))
+        )
+        .test()
+        .assertFailure(TestException.class, 1, 2);
+    }
+
+    @Test
+    public void mergeDelayErrorPublisher() {
+        Single.mergeDelayError(Flowable.just(
+                Single.just(1),
+                Single.<Integer>error(new TestException()),
+                Single.just(2))
+        )
+        .test()
+        .assertFailure(TestException.class, 1, 2);
+    }
+
+    @Test
+    public void mergeDelayError2() {
+        Single.mergeDelayError(
+                Single.just(1),
+                Single.<Integer>error(new TestException())
+        )
+        .test()
+        .assertFailure(TestException.class, 1);
+    }
+
+    @Test
+    public void mergeDelayError2ErrorFirst() {
+        Single.mergeDelayError(
+                Single.<Integer>error(new TestException()),
+                Single.just(1)
+        )
+        .test()
+        .assertFailure(TestException.class, 1);
+    }
+
+    @Test
+    public void mergeDelayError3() {
+        Single.mergeDelayError(
+                Single.just(1),
+                Single.<Integer>error(new TestException()),
+                Single.just(2)
+        )
+        .test()
+        .assertFailure(TestException.class, 1, 2);
+    }
+
+    @Test
+    public void mergeDelayError4() {
+        Single.mergeDelayError(
+                Single.just(1),
+                Single.<Integer>error(new TestException()),
+                Single.just(2),
+                Single.just(3)
+        )
+        .test()
+        .assertFailure(TestException.class, 1, 2, 3);
+    }
 }

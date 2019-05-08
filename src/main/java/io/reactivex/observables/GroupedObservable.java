@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 package io.reactivex.observables;
 
 import io.reactivex.Observable;
+import io.reactivex.annotations.Nullable;
 
 /**
  * An {@link Observable} that has been grouped by key, the value of which can be obtained with {@link #getKey()}.
@@ -37,7 +38,7 @@ public abstract class GroupedObservable<K, T> extends Observable<T> {
      * Constructs a GroupedObservable with the given key.
      * @param key the key
      */
-    protected GroupedObservable(K key) {
+    protected GroupedObservable(@Nullable K key) {
         this.key = key;
     }
 
@@ -46,6 +47,7 @@ public abstract class GroupedObservable<K, T> extends Observable<T> {
      *
      * @return the key that the items emitted by this {@code GroupedObservable} were grouped by
      */
+    @Nullable
     public K getKey() {
         return key;
     }

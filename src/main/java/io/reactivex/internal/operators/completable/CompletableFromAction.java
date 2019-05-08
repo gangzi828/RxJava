@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,6 +17,7 @@ import io.reactivex.*;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Action;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class CompletableFromAction extends Completable {
 
@@ -27,20 +28,22 @@ public final class CompletableFromAction extends Completable {
     }
 
     @Override
-    protected void subscribeActual(CompletableObserver s) {
+    protected void subscribeActual(CompletableObserver observer) {
         Disposable d = Disposables.empty();
-        s.onSubscribe(d);
+        observer.onSubscribe(d);
         try {
             run.run();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             if (!d.isDisposed()) {
-                s.onError(e);
+                observer.onError(e);
+            } else {
+                RxJavaPlugins.onError(e);
             }
             return;
         }
         if (!d.isDisposed()) {
-            s.onComplete();
+            observer.onComplete();
         }
     }
 

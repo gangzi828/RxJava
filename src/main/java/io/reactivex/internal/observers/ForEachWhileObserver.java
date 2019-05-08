@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.exceptions.Exceptions;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.internal.disposables.DisposableHelper;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -25,7 +25,6 @@ import io.reactivex.plugins.RxJavaPlugins;
 public final class ForEachWhileObserver<T>
 extends AtomicReference<Disposable>
 implements Observer<T>, Disposable {
-
 
     private static final long serialVersionUID = -4403180040475402120L;
 
@@ -45,8 +44,8 @@ implements Observer<T>, Disposable {
     }
 
     @Override
-    public void onSubscribe(Disposable s) {
-        DisposableHelper.setOnce(this, s);
+    public void onSubscribe(Disposable d) {
+        DisposableHelper.setOnce(this, d);
     }
 
     @Override
@@ -82,7 +81,7 @@ implements Observer<T>, Disposable {
             onError.accept(t);
         } catch (Throwable ex) {
             Exceptions.throwIfFatal(ex);
-            RxJavaPlugins.onError(ex);
+            RxJavaPlugins.onError(new CompositeException(t, ex));
         }
     }
 

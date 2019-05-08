@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,12 +13,18 @@
 
 package io.reactivex;
 
-import io.reactivex.functions.Function;
+import io.reactivex.annotations.*;
 
 /**
- * Convenience interface and callback used by the lift operator that given a child CompletableSubscriber,
- * return a parent CompletableSubscriber that does any kind of lifecycle-related transformations.
+ * Interface to map/wrap a downstream observer to an upstream observer.
  */
-public interface CompletableOperator extends Function<CompletableObserver, CompletableObserver> {
-
+public interface CompletableOperator {
+    /**
+     * Applies a function to the child CompletableObserver and returns a new parent CompletableObserver.
+     * @param observer the child CompletableObservable instance
+     * @return the parent CompletableObserver instance
+     * @throws Exception on failure
+     */
+    @NonNull
+    CompletableObserver apply(@NonNull CompletableObserver observer) throws Exception;
 }

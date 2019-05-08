@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,18 +13,17 @@
 
 package io.reactivex.internal.operators.maybe;
 
-import static org.junit.Assert.*;
-
-import java.util.List;
-
-import org.junit.Test;
-
 import io.reactivex.TestHelper;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
 import io.reactivex.plugins.RxJavaPlugins;
+import org.junit.Test;
+
+import java.util.List;
+
+import static org.junit.Assert.*;
 
 public class MaybeCallbackObserverTest {
 
@@ -63,7 +62,7 @@ public class MaybeCallbackObserverTest {
 
             mo.onSuccess(1);
 
-            TestHelper.assertError(errors, 0, TestException.class);
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -116,9 +115,27 @@ public class MaybeCallbackObserverTest {
 
             mo.onComplete();
 
-            TestHelper.assertError(errors, 0, TestException.class);
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
+    }
+
+    @Test
+    public void onErrorMissingShouldReportNoCustomOnError() {
+        MaybeCallbackObserver<Integer> o = new MaybeCallbackObserver<Integer>(Functions.<Integer>emptyConsumer(),
+                Functions.ON_ERROR_MISSING,
+                Functions.EMPTY_ACTION);
+
+        assertFalse(o.hasCustomOnError());
+    }
+
+    @Test
+    public void customOnErrorShouldReportCustomOnError() {
+        MaybeCallbackObserver<Integer> o = new MaybeCallbackObserver<Integer>(Functions.<Integer>emptyConsumer(),
+                Functions.<Throwable>emptyConsumer(),
+                Functions.EMPTY_ACTION);
+
+        assertTrue(o.hasCustomOnError());
     }
 }

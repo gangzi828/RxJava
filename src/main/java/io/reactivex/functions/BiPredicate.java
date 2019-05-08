@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,6 +12,8 @@
  */
 
 package io.reactivex.functions;
+
+import io.reactivex.annotations.NonNull;
 
 /**
  * A functional interface (callback) that returns true or false for the given input values.
@@ -27,5 +29,5 @@ public interface BiPredicate<T1, T2> {
      * @return the boolean result
      * @throws Exception on error
      */
-    boolean test(T1 t1, T2 t2) throws Exception;
+    boolean test(@NonNull T1 t1, @NonNull T2 t2) throws Exception;
 }

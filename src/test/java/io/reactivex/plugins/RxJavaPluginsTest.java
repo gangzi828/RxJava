@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,14 @@
 
 package io.reactivex.plugins;
 
-import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
-import java.io.IOException;
+import java.io.*;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.*;
 
 import org.junit.*;
 import org.reactivestreams.*;
@@ -34,7 +33,7 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.Scheduler.Worker;
 import io.reactivex.disposables.*;
-import io.reactivex.exceptions.TestException;
+import io.reactivex.exceptions.*;
 import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
@@ -42,10 +41,12 @@ import io.reactivex.internal.operators.completable.CompletableError;
 import io.reactivex.internal.operators.flowable.FlowableRange;
 import io.reactivex.internal.operators.maybe.MaybeError;
 import io.reactivex.internal.operators.observable.ObservableRange;
+import io.reactivex.internal.operators.parallel.ParallelFromPublisher;
 import io.reactivex.internal.operators.single.SingleJust;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.subscriptions.ScalarSubscription;
 import io.reactivex.observables.ConnectableObservable;
+import io.reactivex.parallel.ParallelFlowable;
 import io.reactivex.schedulers.Schedulers;
 
 public class RxJavaPluginsTest {
@@ -225,29 +226,50 @@ public class RxJavaPluginsTest {
                 }
             };
 
+            BooleanSupplier bs = new BooleanSupplier() {
+                @Override
+                public boolean getAsBoolean() throws Exception {
+                    return true;
+                }
+            };
+
             for (Method m : RxJavaPlugins.class.getMethods()) {
                 if (m.getName().startsWith("set")) {
 
-                    Method getter = RxJavaPlugins.class.getMethod("get" + m.getName().substring(3));
+                    Method getter;
+
+                    Class<?> paramType = m.getParameterTypes()[0];
+
+                    if (paramType == Boolean.TYPE) {
+                        getter = RxJavaPlugins.class.getMethod("is" + m.getName().substring(3));
+                    } else {
+                        getter = RxJavaPlugins.class.getMethod("get" + m.getName().substring(3));
+                    }
 
                     Object before = getter.invoke(null);
 
                     try {
-                        if (m.getParameterTypes()[0].isAssignableFrom(Callable.class)) {
+                        if (paramType.isAssignableFrom(Boolean.TYPE)) {
+                            m.invoke(null, true);
+                        } else
+                        if (paramType.isAssignableFrom(Callable.class)) {
                             m.invoke(null, f0);
                         } else
-                        if (m.getParameterTypes()[0].isAssignableFrom(Function.class)) {
+                        if (paramType.isAssignableFrom(Function.class)) {
                             m.invoke(null, f1);
                         } else
-                        if (m.getParameterTypes()[0].isAssignableFrom(Consumer.class)) {
+                        if (paramType.isAssignableFrom(Consumer.class)) {
                             m.invoke(null, a1);
+                        } else
+                        if (paramType.isAssignableFrom(BooleanSupplier.class)) {
+                            m.invoke(null, bs);
                         } else {
                             m.invoke(null, f2);
                         }
                         fail("Should have thrown InvocationTargetException(IllegalStateException)");
                     } catch (InvocationTargetException ex) {
                         if (ex.getCause() instanceof IllegalStateException) {
-                            assertEquals("Plugins can't be changed anymore",ex.getCause().getMessage());
+                            assertEquals("Plugins can't be changed anymore", ex.getCause().getMessage());
                         } else {
                             fail("Should have thrown InvocationTargetException(IllegalStateException)");
                         }
@@ -255,7 +277,11 @@ public class RxJavaPluginsTest {
 
                     Object after = getter.invoke(null);
 
-                    assertSame(m.toString(), before, after);
+                    if (paramType.isPrimitive()) {
+                        assertEquals(m.toString(), before, after);
+                    } else {
+                        assertSame(m.toString(), before, after);
+                    }
                 }
             }
 
@@ -682,12 +708,12 @@ public class RxJavaPluginsTest {
         try {
             RxJavaPlugins.setOnFlowableSubscribe(new BiFunction<Flowable, Subscriber, Subscriber>() {
                 @Override
-                public Subscriber apply(Flowable o, final Subscriber t) {
+                public Subscriber apply(Flowable f, final Subscriber t) {
                     return new Subscriber() {
 
                         @Override
-                        public void onSubscribe(Subscription d) {
-                            t.onSubscribe(d);
+                        public void onSubscribe(Subscription s) {
+                            t.onSubscribe(s);
                         }
 
                         @SuppressWarnings("unchecked")
@@ -1006,7 +1032,7 @@ public class RxJavaPluginsTest {
             RxJavaPlugins.onError(new TestException("Forced failure"));
 
             assertEquals(1, list.size());
-            assertTestException(list, 0, "Forced failure");
+            assertUndeliverableTestException(list, 0, "Forced failure");
         } finally {
             RxJavaPlugins.reset();
         }
@@ -1061,7 +1087,7 @@ public class RxJavaPluginsTest {
             RxJavaPlugins.onError(new TestException("Forced failure 3"));
 
             assertEquals(1, list.size());
-            assertTestException(list, 0, "Forced failure");
+            assertUndeliverableTestException(list, 0, "Forced failure");
         } finally {
             RxJavaPlugins.reset();
             Thread.currentThread().setUncaughtExceptionHandler(null);
@@ -1093,7 +1119,7 @@ public class RxJavaPluginsTest {
 
             assertEquals(2, list.size());
             assertTestException(list, 0, "Forced failure 2");
-            assertTestException(list, 1, "Forced failure");
+            assertUndeliverableTestException(list, 1, "Forced failure");
 
             Thread.currentThread().setUncaughtExceptionHandler(null);
 
@@ -1143,7 +1169,150 @@ public class RxJavaPluginsTest {
         }
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
+    /**
+     * Ensure set*() accepts a consumers/functions with wider bounds.
+     * @throws Exception on error
+     */
+    @Test
+    @SuppressWarnings("rawtypes")
+    public void onErrorWithSuper() throws Exception {
+        try {
+            Consumer<? super Throwable> errorHandler = new Consumer<Throwable>() {
+                @Override
+                public void accept(Throwable t) {
+                    throw new TestException("Forced failure 2");
+                }
+            };
+            RxJavaPlugins.setErrorHandler(errorHandler);
+
+            Consumer<? super Throwable> errorHandler1 = RxJavaPlugins.getErrorHandler();
+            assertSame(errorHandler, errorHandler1);
+
+            Function<? super Scheduler, ? extends Scheduler> scheduler2scheduler = new Function<Scheduler, Scheduler>() {
+                @Override
+                public Scheduler apply(Scheduler scheduler) throws Exception {
+                    return scheduler;
+                }
+            };
+            Function<? super Callable<Scheduler>, ? extends Scheduler> callable2scheduler = new Function<Callable<Scheduler>, Scheduler>() {
+                @Override
+                public Scheduler apply(Callable<Scheduler> schedulerCallable) throws Exception {
+                    return schedulerCallable.call();
+                }
+            };
+            Function<? super ConnectableFlowable, ? extends ConnectableFlowable> connectableFlowable2ConnectableFlowable = new Function<ConnectableFlowable, ConnectableFlowable>() {
+                @Override
+                public ConnectableFlowable apply(ConnectableFlowable connectableFlowable) throws Exception {
+                    return connectableFlowable;
+                }
+            };
+            Function<? super ConnectableObservable, ? extends ConnectableObservable> connectableObservable2ConnectableObservable = new Function<ConnectableObservable, ConnectableObservable>() {
+                @Override
+                public ConnectableObservable apply(ConnectableObservable connectableObservable) throws Exception {
+                    return connectableObservable;
+                }
+            };
+            Function<? super Flowable, ? extends Flowable> flowable2Flowable = new Function<Flowable, Flowable>() {
+                @Override
+                public Flowable apply(Flowable flowable) throws Exception {
+                    return flowable;
+                }
+            };
+            BiFunction<? super Flowable, ? super Subscriber, ? extends Subscriber> flowable2subscriber = new BiFunction<Flowable, Subscriber, Subscriber>() {
+                @Override
+                public Subscriber apply(Flowable flowable, Subscriber subscriber) throws Exception {
+                    return subscriber;
+                }
+            };
+            Function<Maybe, Maybe> maybe2maybe = new Function<Maybe, Maybe>() {
+                @Override
+                public Maybe apply(Maybe maybe) throws Exception {
+                    return maybe;
+                }
+            };
+            BiFunction<Maybe, MaybeObserver, MaybeObserver> maybe2observer = new BiFunction<Maybe, MaybeObserver, MaybeObserver>() {
+                @Override
+                public MaybeObserver apply(Maybe maybe, MaybeObserver maybeObserver) throws Exception {
+                    return maybeObserver;
+                }
+            };
+            Function<Observable, Observable> observable2observable = new Function<Observable, Observable>() {
+                @Override
+                public Observable apply(Observable observable) throws Exception {
+                    return observable;
+                }
+            };
+            BiFunction<? super Observable, ? super Observer, ? extends Observer> observable2observer = new BiFunction<Observable, Observer, Observer>() {
+                @Override
+                public Observer apply(Observable observable, Observer observer) throws Exception {
+                    return observer;
+                }
+            };
+            Function<? super ParallelFlowable, ? extends ParallelFlowable> parallelFlowable2parallelFlowable = new Function<ParallelFlowable, ParallelFlowable>() {
+                @Override
+                public ParallelFlowable apply(ParallelFlowable parallelFlowable) throws Exception {
+                    return parallelFlowable;
+                }
+            };
+            Function<Single, Single> single2single = new Function<Single, Single>() {
+                @Override
+                public Single apply(Single single) throws Exception {
+                    return single;
+                }
+            };
+            BiFunction<? super Single, ? super SingleObserver, ? extends SingleObserver> single2observer = new BiFunction<Single, SingleObserver, SingleObserver>() {
+                @Override
+                public SingleObserver apply(Single single, SingleObserver singleObserver) throws Exception {
+                    return singleObserver;
+                }
+            };
+            Function<? super Runnable, ? extends Runnable> runnable2runnable = new Function<Runnable, Runnable>() {
+                @Override
+                public Runnable apply(Runnable runnable) throws Exception {
+                    return runnable;
+                }
+            };
+            BiFunction<? super Completable, ? super CompletableObserver, ? extends CompletableObserver> completableObserver2completableObserver = new BiFunction<Completable, CompletableObserver, CompletableObserver>() {
+                @Override
+                public CompletableObserver apply(Completable completable, CompletableObserver completableObserver) throws Exception {
+                    return completableObserver;
+                }
+            };
+            Function<? super Completable, ? extends Completable> completable2completable = new Function<Completable, Completable>() {
+                @Override
+                public Completable apply(Completable completable) throws Exception {
+                    return completable;
+                }
+            };
+
+            RxJavaPlugins.setInitComputationSchedulerHandler(callable2scheduler);
+            RxJavaPlugins.setComputationSchedulerHandler(scheduler2scheduler);
+            RxJavaPlugins.setIoSchedulerHandler(scheduler2scheduler);
+            RxJavaPlugins.setNewThreadSchedulerHandler(scheduler2scheduler);
+            RxJavaPlugins.setOnConnectableFlowableAssembly(connectableFlowable2ConnectableFlowable);
+            RxJavaPlugins.setOnConnectableObservableAssembly(connectableObservable2ConnectableObservable);
+            RxJavaPlugins.setOnFlowableAssembly(flowable2Flowable);
+            RxJavaPlugins.setOnFlowableSubscribe(flowable2subscriber);
+            RxJavaPlugins.setOnMaybeAssembly(maybe2maybe);
+            RxJavaPlugins.setOnMaybeSubscribe(maybe2observer);
+            RxJavaPlugins.setOnObservableAssembly(observable2observable);
+            RxJavaPlugins.setOnObservableSubscribe(observable2observer);
+            RxJavaPlugins.setOnParallelAssembly(parallelFlowable2parallelFlowable);
+            RxJavaPlugins.setOnSingleAssembly(single2single);
+            RxJavaPlugins.setOnSingleSubscribe(single2observer);
+            RxJavaPlugins.setScheduleHandler(runnable2runnable);
+            RxJavaPlugins.setSingleSchedulerHandler(scheduler2scheduler);
+            RxJavaPlugins.setOnCompletableSubscribe(completableObserver2completableObserver);
+            RxJavaPlugins.setOnCompletableAssembly(completable2completable);
+            RxJavaPlugins.setInitSingleSchedulerHandler(callable2scheduler);
+            RxJavaPlugins.setInitNewThreadSchedulerHandler(callable2scheduler);
+            RxJavaPlugins.setInitIoSchedulerHandler(callable2scheduler);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked" })
     @Test
     public void clearIsPassthrough() {
         try {
@@ -1199,8 +1368,6 @@ public class RxJavaPluginsTest {
 
             assertNull(RxJavaPlugins.onAssembly((Maybe)null));
 
-            assertNull(RxJavaPlugins.onSchedule(null));
-
             Maybe myb = new Maybe() {
                 @Override
                 public void subscribeActual(MaybeObserver t) {
@@ -1210,11 +1377,7 @@ public class RxJavaPluginsTest {
 
             assertSame(myb, RxJavaPlugins.onAssembly(myb));
 
-
-            assertNull(RxJavaPlugins.onSchedule(null));
-
             Runnable action = Functions.EMPTY_RUNNABLE;
-
             assertSame(action, RxJavaPlugins.onSchedule(action));
 
             class AllSubscriber implements Subscriber, Observer, SingleObserver, CompletableObserver, MaybeObserver {
@@ -1324,14 +1487,6 @@ public class RxJavaPluginsTest {
 //
 //            assertSame(cop, RxJavaPlugins.onCompletableLift(cop));
 
-            assertNull(RxJavaPlugins.onComputationScheduler(null));
-
-            assertNull(RxJavaPlugins.onIoScheduler(null));
-
-            assertNull(RxJavaPlugins.onNewThreadScheduler(null));
-
-            assertNull(RxJavaPlugins.onSingleScheduler(null));
-
             final Scheduler s = ImmediateThinScheduler.INSTANCE;
             Callable<Scheduler> c = new Callable<Scheduler>() {
                 @Override
@@ -1363,6 +1518,11 @@ public class RxJavaPluginsTest {
     static void assertTestException(List<Throwable> list, int index, String message) {
         assertTrue(list.get(index).toString(), list.get(index) instanceof TestException);
         assertEquals(message, list.get(index).getMessage());
+    }
+
+    static void assertUndeliverableTestException(List<Throwable> list, int index, String message) {
+        assertTrue(list.get(index).toString(), list.get(index).getCause() instanceof TestException);
+        assertEquals(message, list.get(index).getCause().getMessage());
     }
 
     static void assertNPE(List<Throwable> list, int index) {
@@ -1792,7 +1952,6 @@ public class RxJavaPluginsTest {
         }
     }
 
-
     @SuppressWarnings("rawtypes")
     @Test
     public void maybeCreate() {
@@ -1889,5 +2048,203 @@ public class RxJavaPluginsTest {
         } finally {
             RxJavaPlugins.reset();
         }
+    }
+
+    private static void verifyThread(Scheduler scheduler, String expectedThreadName)
+            throws AssertionError {
+        assertNotNull(scheduler);
+        Worker w = scheduler.createWorker();
+        try {
+            final AtomicReference<Thread> value = new AtomicReference<Thread>();
+            final CountDownLatch cdl = new CountDownLatch(1);
+
+            w.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    value.set(Thread.currentThread());
+                    cdl.countDown();
+                }
+            });
+
+            cdl.await();
+
+            Thread t = value.get();
+            assertNotNull(t);
+            assertTrue(expectedThreadName.equals(t.getName()));
+        } catch (Exception e) {
+            fail();
+        } finally {
+            w.dispose();
+        }
+    }
+
+    @Test
+    public void createComputationScheduler() {
+        final String name = "ComputationSchedulerTest";
+        ThreadFactory factory = new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, name);
+            }
+        };
+
+        final Scheduler customScheduler = RxJavaPlugins.createComputationScheduler(factory);
+        RxJavaPlugins.setComputationSchedulerHandler(new Function<Scheduler, Scheduler>() {
+            @Override
+            public Scheduler apply(Scheduler scheduler) throws Exception {
+                return customScheduler;
+            }
+        });
+
+        try {
+            verifyThread(Schedulers.computation(), name);
+        } finally {
+            customScheduler.shutdown();
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void createIoScheduler() {
+        final String name = "IoSchedulerTest";
+        ThreadFactory factory = new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, name);
+            }
+        };
+
+        final Scheduler customScheduler = RxJavaPlugins.createIoScheduler(factory);
+        RxJavaPlugins.setIoSchedulerHandler(new Function<Scheduler, Scheduler>() {
+            @Override
+            public Scheduler apply(Scheduler scheduler) throws Exception {
+                return customScheduler;
+            }
+        });
+
+        try {
+            verifyThread(Schedulers.io(), name);
+        } finally {
+            customScheduler.shutdown();
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void createNewThreadScheduler() {
+        final String name = "NewThreadSchedulerTest";
+        ThreadFactory factory = new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, name);
+            }
+        };
+
+        final Scheduler customScheduler = RxJavaPlugins.createNewThreadScheduler(factory);
+        RxJavaPlugins.setNewThreadSchedulerHandler(new Function<Scheduler, Scheduler>() {
+            @Override
+            public Scheduler apply(Scheduler scheduler) throws Exception {
+                return customScheduler;
+            }
+        });
+
+        try {
+            verifyThread(Schedulers.newThread(), name);
+        } finally {
+            customScheduler.shutdown();
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void createSingleScheduler() {
+        final String name = "SingleSchedulerTest";
+        ThreadFactory factory = new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, name);
+            }
+        };
+
+        final Scheduler customScheduler = RxJavaPlugins.createSingleScheduler(factory);
+
+        RxJavaPlugins.setSingleSchedulerHandler(new Function<Scheduler, Scheduler>() {
+            @Override
+            public Scheduler apply(Scheduler scheduler) throws Exception {
+                return customScheduler;
+            }
+        });
+
+        try {
+            verifyThread(Schedulers.single(), name);
+        } finally {
+            customScheduler.shutdown();
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void onBeforeBlocking() {
+        try {
+            RxJavaPlugins.setOnBeforeBlocking(new BooleanSupplier() {
+                @Override
+                public boolean getAsBoolean() throws Exception {
+                    throw new IllegalArgumentException();
+                }
+            });
+
+            try {
+                RxJavaPlugins.onBeforeBlocking();
+                fail("Should have thrown");
+            } catch (IllegalArgumentException ex) {
+                // expected
+            }
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    @Test
+    public void onParallelAssembly() {
+        try {
+            RxJavaPlugins.setOnParallelAssembly(new Function<ParallelFlowable, ParallelFlowable>() {
+                @Override
+                public ParallelFlowable apply(ParallelFlowable pf) throws Exception {
+                    return new ParallelFromPublisher<Integer>(Flowable.just(2), 2, 2);
+                }
+            });
+
+            Flowable.just(1)
+            .parallel()
+            .sequential()
+            .test()
+            .assertResult(2);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+
+        Flowable.just(1)
+        .parallel()
+        .sequential()
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void isBug() {
+        assertFalse(RxJavaPlugins.isBug(new RuntimeException()));
+        assertFalse(RxJavaPlugins.isBug(new IOException()));
+        assertFalse(RxJavaPlugins.isBug(new InterruptedException()));
+        assertFalse(RxJavaPlugins.isBug(new InterruptedIOException()));
+
+        assertTrue(RxJavaPlugins.isBug(new NullPointerException()));
+        assertTrue(RxJavaPlugins.isBug(new IllegalArgumentException()));
+        assertTrue(RxJavaPlugins.isBug(new IllegalStateException()));
+        assertTrue(RxJavaPlugins.isBug(new MissingBackpressureException()));
+        assertTrue(RxJavaPlugins.isBug(new ProtocolViolationException("")));
+        assertTrue(RxJavaPlugins.isBug(new UndeliverableException(new TestException())));
+        assertTrue(RxJavaPlugins.isBug(new CompositeException(new TestException())));
+        assertTrue(RxJavaPlugins.isBug(new OnErrorNotImplementedException(new TestException())));
     }
 }

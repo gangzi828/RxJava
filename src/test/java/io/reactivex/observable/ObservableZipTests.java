@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,7 +28,7 @@ import io.reactivex.observables.GroupedObservable;
 public class ObservableZipTests {
 
     @Test
-    public void testZipObservableOfObservables() {
+    public void testZipObservableOfObservables() throws Exception {
         ObservableEventStream.getEventStream("HTTP-ClusterB", 20)
                 .groupBy(new Function<Event, String>() {
                     @Override
@@ -63,6 +63,8 @@ public class ObservableZipTests {
                 });
 
         System.out.println("**** finished");
+
+        Thread.sleep(200); // make sure the event streams receive their interrupt
     }
 
     /**

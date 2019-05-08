@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,7 +22,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 /**
  * Singleton implementing many interfaces as empty.
  */
-public enum EmptyComponent implements Subscriber<Object>, Observer<Object>, MaybeObserver<Object>,
+public enum EmptyComponent implements FlowableSubscriber<Object>, Observer<Object>, MaybeObserver<Object>,
 SingleObserver<Object>, CompletableObserver, Subscription, Disposable {
     INSTANCE;
 

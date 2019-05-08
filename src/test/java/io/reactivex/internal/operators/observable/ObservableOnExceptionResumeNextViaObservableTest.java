@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -183,10 +183,9 @@ public class ObservableOnExceptionResumeNextViaObservableTest {
         verify(observer, times(1)).onComplete();
     }
 
-
     @Test
     public void testBackpressure() {
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
         Observable.range(0, 100000)
                 .onExceptionResumeNext(Observable.just(1))
                 .observeOn(Schedulers.computation())
@@ -207,11 +206,10 @@ public class ObservableOnExceptionResumeNextViaObservableTest {
                     }
 
                 })
-                .subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+                .subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
     }
-
 
     private static class TestObservable implements ObservableSource<String> {
 

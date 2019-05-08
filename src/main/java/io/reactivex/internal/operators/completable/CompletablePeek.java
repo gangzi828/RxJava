@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,10 +14,10 @@
 package io.reactivex.internal.operators.completable;
 
 import io.reactivex.*;
-import io.reactivex.disposables.*;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
-import io.reactivex.internal.disposables.EmptyDisposable;
+import io.reactivex.internal.disposables.*;
 import io.reactivex.plugins.RxJavaPlugins;
 
 public final class CompletablePeek extends Completable {
@@ -46,79 +46,100 @@ public final class CompletablePeek extends Completable {
     }
 
     @Override
-    protected void subscribeActual(final CompletableObserver s) {
+    protected void subscribeActual(final CompletableObserver observer) {
 
-        source.subscribe(new CompletableObserver() {
-
-            @Override
-            public void onComplete() {
-                try {
-                    onComplete.run();
-                    onTerminate.run();
-                } catch (Throwable e) {
-                    Exceptions.throwIfFatal(e);
-                    s.onError(e);
-                    return;
-                }
-
-                s.onComplete();
-
-                try {
-                    onAfterTerminate.run();
-                } catch (Throwable e) {
-                    Exceptions.throwIfFatal(e);
-                    RxJavaPlugins.onError(e);
-                }
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                try {
-                    onError.accept(e);
-                    onTerminate.run();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    e = new CompositeException(ex, e);
-                }
-
-                s.onError(e);
-
-                try {
-                    onAfterTerminate.run();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    RxJavaPlugins.onError(ex);
-                }
-            }
-
-            @Override
-            public void onSubscribe(final Disposable d) {
-
-                try {
-                    onSubscribe.accept(d);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    d.dispose();
-                    EmptyDisposable.error(ex, s);
-                    return;
-                }
-
-                s.onSubscribe(Disposables.fromRunnable(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            onDispose.run();
-                        } catch (Throwable e) {
-                            Exceptions.throwIfFatal(e);
-                            RxJavaPlugins.onError(e);
-                        }
-                        d.dispose();
-                    }
-                }));
-            }
-
-        });
+        source.subscribe(new CompletableObserverImplementation(observer));
     }
 
+    final class CompletableObserverImplementation implements CompletableObserver, Disposable {
 
+        final CompletableObserver downstream;
+
+        Disposable upstream;
+
+        CompletableObserverImplementation(CompletableObserver downstream) {
+            this.downstream = downstream;
+        }
+
+        @Override
+        public void onSubscribe(final Disposable d) {
+            try {
+                onSubscribe.accept(d);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                d.dispose();
+                this.upstream = DisposableHelper.DISPOSED;
+                EmptyDisposable.error(ex, downstream);
+                return;
+            }
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
+            }
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            if (upstream == DisposableHelper.DISPOSED) {
+                RxJavaPlugins.onError(e);
+                return;
+            }
+            try {
+                onError.accept(e);
+                onTerminate.run();
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                e = new CompositeException(e, ex);
+            }
+
+            downstream.onError(e);
+
+            doAfter();
+        }
+
+        @Override
+        public void onComplete() {
+            if (upstream == DisposableHelper.DISPOSED) {
+                return;
+            }
+
+            try {
+                onComplete.run();
+                onTerminate.run();
+            } catch (Throwable e) {
+                Exceptions.throwIfFatal(e);
+                downstream.onError(e);
+                return;
+            }
+
+            downstream.onComplete();
+
+            doAfter();
+        }
+
+        void doAfter() {
+            try {
+                onAfterTerminate.run();
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                RxJavaPlugins.onError(ex);
+            }
+        }
+
+        @Override
+        public void dispose() {
+            try {
+                onDispose.run();
+            } catch (Throwable e) {
+                Exceptions.throwIfFatal(e);
+                RxJavaPlugins.onError(e);
+            }
+            upstream.dispose();
+        }
+
+        @Override
+        public boolean isDisposed() {
+            return upstream.isDisposed();
+        }
+    }
 }

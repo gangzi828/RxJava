@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,8 +16,9 @@ package io.reactivex.internal.operators.observable;
 import java.util.concurrent.*;
 
 import io.reactivex.*;
-import io.reactivex.disposables.*;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.internal.observers.DeferredScalarDisposable;
 
 public final class ObservableFromFuture<T> extends Observable<T> {
     final Future<? extends T> future;
@@ -31,30 +32,21 @@ public final class ObservableFromFuture<T> extends Observable<T> {
     }
 
     @Override
-    public void subscribeActual(Observer<? super T> s) {
-        Disposable d = Disposables.empty();
-        s.onSubscribe(d);
+    public void subscribeActual(Observer<? super T> observer) {
+        DeferredScalarDisposable<T> d = new DeferredScalarDisposable<T>(observer);
+        observer.onSubscribe(d);
         if (!d.isDisposed()) {
             T v;
             try {
-                v = unit != null ? future.get(timeout, unit) : future.get();
+                v = ObjectHelper.requireNonNull(unit != null ? future.get(timeout, unit) : future.get(), "Future returned null");
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
                 if (!d.isDisposed()) {
-                    s.onError(ex);
+                    observer.onError(ex);
                 }
                 return;
-            } finally {
-                future.cancel(true); // TODO ?? not sure about this
             }
-            if (!d.isDisposed()) {
-                if (v != null) {
-                    s.onNext(v);
-                    s.onComplete();
-                } else {
-                    s.onError(new NullPointerException("Future returned null"));
-                }
-            }
+            d.complete(v);
         }
     }
 }

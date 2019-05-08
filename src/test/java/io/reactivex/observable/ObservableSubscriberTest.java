@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -174,12 +174,11 @@ public class ObservableSubscriberTest {
 
     @Test
     public void safeSubscriberAlreadySafe() {
-        TestObserver<Integer> ts = new TestObserver<Integer>();
-        Observable.just(1).safeSubscribe(new SafeObserver<Integer>(ts));
+        TestObserver<Integer> to = new TestObserver<Integer>();
+        Observable.just(1).safeSubscribe(new SafeObserver<Integer>(to));
 
-        ts.assertResult(1);
+        to.assertResult(1);
     }
-
 
     @Test
     public void methodTestNoCancel() {
@@ -206,7 +205,7 @@ public class ObservableSubscriberTest {
                 Observable.just(1).test();
                 fail("Should have thrown");
             } catch (NullPointerException ex) {
-                assertEquals("Plugin returned null Observer", ex.getMessage());
+                assertEquals("The RxJavaPlugins.onSubscribe hook returned a null Observer. Please change the handler provided to RxJavaPlugins.setOnObservableSubscribe for invalid null returns. Further reading: https://github.com/ReactiveX/RxJava/wiki/Plugins", ex.getMessage());
             }
         } finally {
             RxJavaPlugins.reset();
@@ -215,7 +214,7 @@ public class ObservableSubscriberTest {
 
     static final class BadObservable extends Observable<Integer> {
         @Override
-        protected void subscribeActual(Observer<? super Integer> s) {
+        protected void subscribeActual(Observer<? super Integer> observer) {
             throw new IllegalArgumentException();
         }
     }

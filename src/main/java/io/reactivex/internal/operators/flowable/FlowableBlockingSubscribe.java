@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,19 +17,20 @@ import java.util.concurrent.*;
 
 import org.reactivestreams.*;
 
-import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.*;
-import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.functions.*;
 import io.reactivex.internal.subscribers.*;
 import io.reactivex.internal.util.*;
-import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.subscribers.DefaultSubscriber;
 
 /**
  * Utility methods to consume a Publisher in a blocking manner with callbacks or Subscriber.
  */
-public enum FlowableBlockingSubscribe {
-    ;
+public final class FlowableBlockingSubscribe {
+
+    /** Utility class. */
+    private FlowableBlockingSubscribe() {
+        throw new IllegalStateException("No instances!");
+    }
 
     /**
      * Subscribes to the source and calls the Subscriber methods on the current thread.
@@ -56,23 +57,20 @@ public enum FlowableBlockingSubscribe {
                     if (bs.isCancelled()) {
                         break;
                     }
+                    BlockingHelper.verifyNonBlocking();
                     v = queue.take();
                 }
                 if (bs.isCancelled()) {
                     break;
                 }
-                if (o == BlockingSubscriber.TERMINATED) {
-                    break;
-                }
-                if (NotificationLite.acceptFull(v, subscriber)) {
+                if (v == BlockingSubscriber.TERMINATED
+                        || NotificationLite.acceptFull(v, subscriber)) {
                     break;
                 }
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            subscriber.onError(e);
-        } finally {
             bs.cancel();
+            subscriber.onError(e);
         }
     }
 
@@ -82,31 +80,14 @@ public enum FlowableBlockingSubscribe {
      * @param <T> the value type
      */
     public static <T> void subscribe(Publisher<? extends T> o) {
-        final CountDownLatch cdl = new CountDownLatch(1);
-        final Throwable[] error = { null };
+        BlockingIgnoringReceiver callback = new BlockingIgnoringReceiver();
         LambdaSubscriber<T> ls = new LambdaSubscriber<T>(Functions.emptyConsumer(),
-        new Consumer<Throwable>() {
-            @Override
-            public void accept(Throwable e) {
-                error[0] = e;
-                cdl.countDown();
-            }
-        }, new Action() {
-            @Override
-            public void run() {
-                cdl.countDown();
-            }
-        }, new Consumer<Subscription>() {
-            @Override
-            public void accept(Subscription s) {
-                s.request(Long.MAX_VALUE);
-            }
-        });
+        callback, callback, Functions.REQUEST_MAX);
 
         o.subscribe(ls);
 
-        BlockingHelper.awaitForComplete(cdl, ls);
-        Throwable e = error[0];
+        BlockingHelper.awaitForComplete(callback, ls);
+        Throwable e = callback.error;
         if (e != null) {
             throw ExceptionHelper.wrapOrThrow(e);
         }
@@ -122,50 +103,28 @@ public enum FlowableBlockingSubscribe {
      */
     public static <T> void subscribe(Publisher<? extends T> o, final Consumer<? super T> onNext,
             final Consumer<? super Throwable> onError, final Action onComplete) {
-        subscribe(o, new DefaultSubscriber<T>() {
-            boolean done;
-            @Override
-            public void onNext(T t) {
-                if (done) {
-                    return;
-                }
-                try {
-                    onNext.accept(t);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    cancel();
-                    onError(ex);
-                }
-            }
+        ObjectHelper.requireNonNull(onNext, "onNext is null");
+        ObjectHelper.requireNonNull(onError, "onError is null");
+        ObjectHelper.requireNonNull(onComplete, "onComplete is null");
+        subscribe(o, new LambdaSubscriber<T>(onNext, onError, onComplete, Functions.REQUEST_MAX));
+    }
 
-            @Override
-            public void onError(Throwable e) {
-                if (done) {
-                    RxJavaPlugins.onError(e);
-                    return;
-                }
-                done = true;
-                try {
-                    onError.accept(e);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    RxJavaPlugins.onError(ex);
-                }
-            }
-
-            @Override
-            public void onComplete() {
-                if (done) {
-                    return;
-                }
-                done = true;
-                try {
-                    onComplete.run();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    RxJavaPlugins.onError(ex);
-                }
-            }
-        });
+    /**
+     * Subscribes to the source and calls the given actions on the current thread.
+     * @param o the source publisher
+     * @param onNext the callback action for each source value
+     * @param onError the callback action for an error event
+     * @param onComplete the callback action for the completion event.
+     * @param bufferSize the number of elements to prefetch from the source Publisher
+     * @param <T> the value type
+     */
+    public static <T> void subscribe(Publisher<? extends T> o, final Consumer<? super T> onNext,
+        final Consumer<? super Throwable> onError, final Action onComplete, int bufferSize) {
+        ObjectHelper.requireNonNull(onNext, "onNext is null");
+        ObjectHelper.requireNonNull(onError, "onError is null");
+        ObjectHelper.requireNonNull(onComplete, "onComplete is null");
+        ObjectHelper.verifyPositive(bufferSize, "number > 0 required");
+        subscribe(o, new BoundedSubscriber<T>(onNext, onError, onComplete, Functions.boundedConsumer(bufferSize),
+                bufferSize));
     }
 }

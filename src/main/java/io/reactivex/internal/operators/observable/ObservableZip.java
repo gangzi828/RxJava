@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.Arrays;
 import java.util.concurrent.atomic.*;
 
@@ -45,7 +46,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public void subscribeActual(Observer<? super R> s) {
+    public void subscribeActual(Observer<? super R> observer) {
         ObservableSource<? extends T>[] sources = this.sources;
         int count = 0;
         if (sources == null) {
@@ -63,18 +64,18 @@ public final class ObservableZip<T, R> extends Observable<R> {
         }
 
         if (count == 0) {
-            EmptyDisposable.complete(s);
+            EmptyDisposable.complete(observer);
             return;
         }
 
-        ZipCoordinator<T, R> zc = new ZipCoordinator<T, R>(s, zipper, count, delayError);
+        ZipCoordinator<T, R> zc = new ZipCoordinator<T, R>(observer, zipper, count, delayError);
         zc.subscribe(sources, bufferSize);
     }
 
     static final class ZipCoordinator<T, R> extends AtomicInteger implements Disposable {
 
         private static final long serialVersionUID = 2983708048395377667L;
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
         final Function<? super Object[], ? extends R> zipper;
         final ZipObserver<T, R>[] observers;
         final T[] row;
@@ -86,7 +87,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
         ZipCoordinator(Observer<? super R> actual,
                 Function<? super Object[], ? extends R> zipper,
                 int count, boolean delayError) {
-            this.actual = actual;
+            this.downstream = actual;
             this.zipper = zipper;
             this.observers = new ZipObserver[count];
             this.row = (T[])new Object[count];
@@ -101,7 +102,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
             }
             // this makes sure the contents of the observers array is visible
             this.lazySet(0);
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
             for (int i = 0; i < len; i++) {
                 if (cancelled) {
                     return;
@@ -114,6 +115,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
         public void dispose() {
             if (!cancelled) {
                 cancelled = true;
+                cancelSources();
                 if (getAndIncrement() == 0) {
                     clear();
                 }
@@ -125,9 +127,19 @@ public final class ObservableZip<T, R> extends Observable<R> {
             return cancelled;
         }
 
-        void clear() {
+        void cancel() {
+            clear();
+            cancelSources();
+        }
+
+        void cancelSources() {
             for (ZipObserver<?, ?> zs : observers) {
                 zs.dispose();
+            }
+        }
+
+        void clear() {
+            for (ZipObserver<?, ?> zs : observers) {
                 zs.queue.clear();
             }
         }
@@ -140,7 +152,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
             int missing = 1;
 
             final ZipObserver<T, R>[] zs = observers;
-            final Observer<? super R> a = actual;
+            final Observer<? super R> a = downstream;
             final T[] os = row;
             final boolean delayError = this.delayError;
 
@@ -167,7 +179,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
                             if (z.done && !delayError) {
                                 Throwable ex = z.error;
                                 if (ex != null) {
-                                    clear();
+                                    cancel();
                                     a.onError(ex);
                                     return;
                                 }
@@ -182,17 +194,11 @@ public final class ObservableZip<T, R> extends Observable<R> {
 
                     R v;
                     try {
-                        v = zipper.apply(os.clone());
+                        v = ObjectHelper.requireNonNull(zipper.apply(os.clone()), "The zipper returned a null value");
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        clear();
+                        cancel();
                         a.onError(ex);
-                        return;
-                    }
-
-                    if (v == null) {
-                        clear();
-                        a.onError(new NullPointerException("The zipper returned a null value"));
                         return;
                     }
 
@@ -210,7 +216,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
 
         boolean checkTerminated(boolean d, boolean empty, Observer<? super R> a, boolean delayError, ZipObserver<?, ?> source) {
             if (cancelled) {
-                clear();
+                cancel();
                 return true;
             }
 
@@ -218,7 +224,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
                 if (delayError) {
                     if (empty) {
                         Throwable e = source.error;
-                        clear();
+                        cancel();
                         if (e != null) {
                             a.onError(e);
                         } else {
@@ -229,12 +235,12 @@ public final class ObservableZip<T, R> extends Observable<R> {
                 } else {
                     Throwable e = source.error;
                     if (e != null) {
-                        clear();
+                        cancel();
                         a.onError(e);
                         return true;
                     } else
                     if (empty) {
-                        clear();
+                        cancel();
                         a.onComplete();
                         return true;
                     }
@@ -245,7 +251,7 @@ public final class ObservableZip<T, R> extends Observable<R> {
         }
     }
 
-    static final class ZipObserver<T, R> implements Observer<T>, Disposable {
+    static final class ZipObserver<T, R> implements Observer<T> {
 
         final ZipCoordinator<T, R> parent;
         final SpscLinkedArrayQueue<T> queue;
@@ -253,29 +259,21 @@ public final class ObservableZip<T, R> extends Observable<R> {
         volatile boolean done;
         Throwable error;
 
-        final AtomicReference<Disposable> s = new AtomicReference<Disposable>();
+        final AtomicReference<Disposable> upstream = new AtomicReference<Disposable>();
 
         ZipObserver(ZipCoordinator<T, R> parent, int bufferSize) {
             this.parent = parent;
             this.queue = new SpscLinkedArrayQueue<T>(bufferSize);
         }
+
         @Override
-        public void onSubscribe(Disposable s) {
-            DisposableHelper.setOnce(this.s, s);
+        public void onSubscribe(Disposable d) {
+            DisposableHelper.setOnce(this.upstream, d);
         }
 
         @Override
         public void onNext(T t) {
-            if (t == null) {
-                s.get().dispose();
-                onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
-                return;
-            }
-            if (!queue.offer(t)) {
-                s.get().dispose();
-                onError(new IllegalStateException("Queue full?!"));
-                return;
-            }
+            queue.offer(t);
             parent.drain();
         }
 
@@ -292,14 +290,8 @@ public final class ObservableZip<T, R> extends Observable<R> {
             parent.drain();
         }
 
-        @Override
         public void dispose() {
-            DisposableHelper.dispose(s);
-        }
-
-        @Override
-        public boolean isDisposed() {
-            return s.get() == DisposableHelper.DISPOSED;
+            DisposableHelper.dispose(upstream);
         }
     }
 }

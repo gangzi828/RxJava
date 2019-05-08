@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,18 +16,48 @@ package io.reactivex.observers;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.CompletableObserver;
+import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.util.EndConsumerHelper;
 
 /**
  * An abstract {@link CompletableObserver} that allows asynchronous cancellation by implementing Disposable.
+ *
+ * <p>All pre-implemented final methods are thread-safe.
+ *
+ * <p>Like all other consumers, {@code DisposableCompletableObserver} can be subscribed only once.
+ * Any subsequent attempt to subscribe it to a new source will yield an
+ * {@link IllegalStateException} with message {@code "It is not allowed to subscribe with a(n) <class name> multiple times."}.
+ *
+ * <p>Implementation of {@link #onStart()}, {@link #onError(Throwable)} and
+ * {@link #onComplete()} are not allowed to throw any unchecked exceptions.
+ *
+ * <p>Example<pre><code>
+ * Disposable d =
+ *     Completable.complete().delay(1, TimeUnit.SECONDS)
+ *     .subscribeWith(new DisposableMaybeObserver&lt;Integer&gt;() {
+ *         &#64;Override public void onStart() {
+ *             System.out.println("Start!");
+ *         }
+ *         &#64;Override public void onError(Throwable t) {
+ *             t.printStackTrace();
+ *         }
+ *         &#64;Override public void onComplete() {
+ *             System.out.println("Done!");
+ *         }
+ *     });
+ * // ...
+ * d.dispose();
+ * </code></pre>
  */
 public abstract class DisposableCompletableObserver implements CompletableObserver, Disposable {
-    final AtomicReference<Disposable> s = new AtomicReference<Disposable>();
+
+    final AtomicReference<Disposable> upstream = new AtomicReference<Disposable>();
 
     @Override
-    public final void onSubscribe(Disposable s) {
-        if (DisposableHelper.setOnce(this.s, s)) {
+    public final void onSubscribe(@NonNull Disposable d) {
+        if (EndConsumerHelper.setOnce(this.upstream, d, getClass())) {
             onStart();
         }
     }
@@ -40,11 +70,11 @@ public abstract class DisposableCompletableObserver implements CompletableObserv
 
     @Override
     public final boolean isDisposed() {
-        return s.get() == DisposableHelper.DISPOSED;
+        return upstream.get() == DisposableHelper.DISPOSED;
     }
 
     @Override
     public final void dispose() {
-        DisposableHelper.dispose(s);
+        DisposableHelper.dispose(upstream);
     }
 }

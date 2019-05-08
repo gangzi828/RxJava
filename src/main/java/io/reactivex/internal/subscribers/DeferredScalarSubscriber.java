@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,6 +15,7 @@ package io.reactivex.internal.subscribers;
 
 import org.reactivestreams.*;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.internal.subscriptions.*;
 
 /**
@@ -24,30 +25,30 @@ import io.reactivex.internal.subscriptions.*;
  * @param <R> the output value type
  */
 public abstract class DeferredScalarSubscriber<T, R> extends DeferredScalarSubscription<R>
-implements Subscriber<T> {
+implements FlowableSubscriber<T> {
 
     private static final long serialVersionUID = 2984505488220891551L;
 
     /** The upstream subscription. */
-    protected Subscription s;
+    protected Subscription upstream;
 
     /** Can indicate if there was at least on onNext call. */
     protected boolean hasValue;
 
     /**
      * Creates a DeferredScalarSubscriber instance and wraps a downstream Subscriber.
-     * @param actual the downstream subscriber, not null (not verified)
+     * @param downstream the downstream subscriber, not null (not verified)
      */
-    public DeferredScalarSubscriber(Subscriber<? super R> actual) {
-        super(actual);
+    public DeferredScalarSubscriber(Subscriber<? super R> downstream) {
+        super(downstream);
     }
 
     @Override
     public void onSubscribe(Subscription s) {
-        if (SubscriptionHelper.validate(this.s, s)) {
-            this.s = s;
+        if (SubscriptionHelper.validate(this.upstream, s)) {
+            this.upstream = s;
 
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
 
             s.request(Long.MAX_VALUE);
         }
@@ -56,7 +57,7 @@ implements Subscriber<T> {
     @Override
     public void onError(Throwable t) {
         value = null;
-        actual.onError(t);
+        downstream.onError(t);
     }
 
     @Override
@@ -64,13 +65,13 @@ implements Subscriber<T> {
         if (hasValue) {
             complete(value);
         } else {
-            actual.onComplete();
+            downstream.onComplete();
         }
     }
 
     @Override
     public void cancel() {
         super.cancel();
-        s.cancel();
+        upstream.cancel();
     }
 }

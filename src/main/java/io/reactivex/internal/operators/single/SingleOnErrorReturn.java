@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,50 +32,55 @@ public final class SingleOnErrorReturn<T> extends Single<T> {
         this.value = value;
     }
 
-
-
     @Override
-    protected void subscribeActual(final SingleObserver<? super T> s) {
+    protected void subscribeActual(final SingleObserver<? super T> observer) {
 
-        source.subscribe(new SingleObserver<T>() {
-
-            @Override
-            public void onError(Throwable e) {
-                T v;
-
-                if (valueSupplier != null) {
-                    try {
-                        v = valueSupplier.apply(e);
-                    } catch (Throwable ex) {
-                        Exceptions.throwIfFatal(ex);
-                        s.onError(new CompositeException(e, ex));
-                        return;
-                    }
-                } else {
-                    v = value;
-                }
-
-                if (v == null) {
-                    NullPointerException npe = new NullPointerException("Value supplied was null");
-                    npe.initCause(e);
-                    s.onError(npe);
-                    return;
-                }
-
-                s.onSuccess(v);
-            }
-
-            @Override
-            public void onSubscribe(Disposable d) {
-                s.onSubscribe(d);
-            }
-
-            @Override
-            public void onSuccess(T value) {
-                s.onSuccess(value);
-            }
-
-        });
+        source.subscribe(new OnErrorReturn(observer));
     }
 
+    final class OnErrorReturn implements SingleObserver<T> {
+
+        private final SingleObserver<? super T> observer;
+
+        OnErrorReturn(SingleObserver<? super T> observer) {
+            this.observer = observer;
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            T v;
+
+            if (valueSupplier != null) {
+                try {
+                    v = valueSupplier.apply(e);
+                } catch (Throwable ex) {
+                    Exceptions.throwIfFatal(ex);
+                    observer.onError(new CompositeException(e, ex));
+                    return;
+                }
+            } else {
+                v = value;
+            }
+
+            if (v == null) {
+                NullPointerException npe = new NullPointerException("Value supplied was null");
+                npe.initCause(e);
+                observer.onError(npe);
+                return;
+            }
+
+            observer.onSuccess(v);
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            observer.onSubscribe(d);
+        }
+
+        @Override
+        public void onSuccess(T value) {
+            observer.onSuccess(value);
+        }
+
+    }
 }

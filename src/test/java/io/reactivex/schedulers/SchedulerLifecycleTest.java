@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -73,31 +73,30 @@ public class SchedulerLifecycleTest {
             }
         };
 
-        CompositeDisposable csub = new CompositeDisposable();
+        CompositeDisposable cd = new CompositeDisposable();
 
         try {
             Worker w1 = Schedulers.computation().createWorker();
-            csub.add(w1);
+            cd.add(w1);
             w1.schedule(countAction);
 
             Worker w2 = Schedulers.io().createWorker();
-            csub.add(w2);
+            cd.add(w2);
             w2.schedule(countAction);
 
             Worker w3 = Schedulers.newThread().createWorker();
-            csub.add(w3);
+            cd.add(w3);
             w3.schedule(countAction);
 
             Worker w4 = Schedulers.single().createWorker();
-            csub.add(w4);
+            cd.add(w4);
             w4.schedule(countAction);
-
 
             if (!cdl.await(3, TimeUnit.SECONDS)) {
                 fail("countAction was not run by every worker");
             }
         } finally {
-            csub.dispose();
+            cd.dispose();
         }
     }
 

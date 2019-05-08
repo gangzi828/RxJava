@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -57,25 +57,25 @@ implements HasUpstreamPublisher<T>, FuseToFlowable<T> {
         source.subscribe(new ReduceSubscriber<T>(observer, reducer));
     }
 
-    static final class ReduceSubscriber<T> implements Subscriber<T>, Disposable {
-        final MaybeObserver<? super T> actual;
+    static final class ReduceSubscriber<T> implements FlowableSubscriber<T>, Disposable {
+        final MaybeObserver<? super T> downstream;
 
         final BiFunction<T, T, T> reducer;
 
         T value;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         ReduceSubscriber(MaybeObserver<? super T> actual, BiFunction<T, T, T> reducer) {
-            this.actual = actual;
+            this.downstream = actual;
             this.reducer = reducer;
         }
 
         @Override
         public void dispose() {
-            s.cancel();
+            upstream.cancel();
             done = true;
         }
 
@@ -86,10 +86,10 @@ implements HasUpstreamPublisher<T>, FuseToFlowable<T> {
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(Long.MAX_VALUE);
             }
@@ -108,7 +108,7 @@ implements HasUpstreamPublisher<T>, FuseToFlowable<T> {
                     value = ObjectHelper.requireNonNull(reducer.apply(v, t), "The reducer returned a null value");
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    s.cancel();
+                    upstream.cancel();
                     onError(ex);
                 }
             }
@@ -121,7 +121,7 @@ implements HasUpstreamPublisher<T>, FuseToFlowable<T> {
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
          }
 
         @Override
@@ -133,12 +133,10 @@ implements HasUpstreamPublisher<T>, FuseToFlowable<T> {
             T v = value;
             if (v != null) {
 //                value = null;
-                actual.onSuccess(v);
+                downstream.onSuccess(v);
             } else {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
-
-
     }
 }

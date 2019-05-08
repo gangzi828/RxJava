@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,7 +13,7 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
@@ -24,7 +24,6 @@ import io.reactivex.functions.Function;
 import io.reactivex.internal.disposables.DisposableHelper;
 import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.fuseable.FuseToFlowable;
-import io.reactivex.internal.observers.BasicIntQueueDisposable;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.AtomicThrowable;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -35,7 +34,7 @@ import io.reactivex.plugins.RxJavaPlugins;
  */
 public final class FlowableFlatMapCompletableCompletable<T> extends Completable implements FuseToFlowable<T> {
 
-    final Publisher<T> source;
+    final Flowable<T> source;
 
     final Function<? super T, ? extends CompletableSource> mapper;
 
@@ -43,7 +42,7 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
 
     final boolean delayErrors;
 
-    public FlowableFlatMapCompletableCompletable(Publisher<T> source,
+    public FlowableFlatMapCompletableCompletable(Flowable<T> source,
             Function<? super T, ? extends CompletableSource> mapper, boolean delayErrors,
             int maxConcurrency) {
         this.source = source;
@@ -62,11 +61,11 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
         return RxJavaPlugins.onAssembly(new FlowableFlatMapCompletable<T>(source, mapper, delayErrors, maxConcurrency));
     }
 
-    static final class FlatMapCompletableMainSubscriber<T> extends BasicIntQueueDisposable<T>
-    implements Subscriber<T> {
+    static final class FlatMapCompletableMainSubscriber<T> extends AtomicInteger
+    implements FlowableSubscriber<T>, Disposable {
         private static final long serialVersionUID = 8443155186132538303L;
 
-        final CompletableObserver actual;
+        final CompletableObserver downstream;
 
         final AtomicThrowable errors;
 
@@ -78,12 +77,14 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
 
         final int maxConcurrency;
 
-        Subscription s;
+        Subscription upstream;
+
+        volatile boolean disposed;
 
         FlatMapCompletableMainSubscriber(CompletableObserver observer,
                 Function<? super T, ? extends CompletableSource> mapper, boolean delayErrors,
                 int maxConcurrency) {
-            this.actual = observer;
+            this.downstream = observer;
             this.mapper = mapper;
             this.delayErrors = delayErrors;
             this.errors = new AtomicThrowable();
@@ -94,10 +95,10 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 int m = maxConcurrency;
                 if (m == Integer.MAX_VALUE) {
@@ -116,7 +117,7 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
                 cs = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null CompletableSource");
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                s.cancel();
+                upstream.cancel();
                 onError(ex);
                 return;
             }
@@ -125,9 +126,9 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
 
             InnerObserver inner = new InnerObserver();
 
-            set.add(inner);
-
-            cs.subscribe(inner);
+            if (!disposed && set.add(inner)) {
+                cs.subscribe(inner);
+            }
         }
 
         @Override
@@ -136,19 +137,17 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
                 if (delayErrors) {
                     if (decrementAndGet() == 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     } else {
                         if (maxConcurrency != Integer.MAX_VALUE) {
-                            s.request(1);
+                            upstream.request(1);
                         }
                     }
                 } else {
                     dispose();
                     if (getAndSet(0) > 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     }
                 }
             } else {
@@ -159,50 +158,29 @@ public final class FlowableFlatMapCompletableCompletable<T> extends Completable 
         @Override
         public void onComplete() {
             if (decrementAndGet() == 0) {
-                if (delayErrors) {
-                    Throwable ex = errors.terminate();
-                    if (ex != null) {
-                        actual.onError(ex);
-                        return;
-                    }
+                Throwable ex = errors.terminate();
+                if (ex != null) {
+                    downstream.onError(ex);
+                } else {
+                    downstream.onComplete();
                 }
-                actual.onComplete();
             } else {
                 if (maxConcurrency != Integer.MAX_VALUE) {
-                    s.request(1);
+                    upstream.request(1);
                 }
             }
         }
 
         @Override
         public void dispose() {
-            s.cancel();
+            disposed = true;
+            upstream.cancel();
             set.dispose();
         }
 
         @Override
         public boolean isDisposed() {
             return set.isDisposed();
-        }
-
-        @Override
-        public T poll() throws Exception {
-            return null; // always empty
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return true; // always empty
-        }
-
-        @Override
-        public void clear() {
-            // nothing to clear
-        }
-
-        @Override
-        public int requestFusion(int mode) {
-            return mode & ASYNC;
         }
 
         void innerComplete(InnerObserver inner) {

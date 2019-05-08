@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,13 +13,17 @@
 
 package io.reactivex.schedulers;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
+
+import java.util.concurrent.TimeUnit;
 
 import org.junit.*;
 
 import io.reactivex.*;
 import io.reactivex.Scheduler.Worker;
+import io.reactivex.disposables.*;
 import io.reactivex.functions.*;
+import io.reactivex.internal.schedulers.IoScheduler;
 
 public class CachedThreadSchedulerTest extends AbstractSchedulerConcurrencyTests {
 
@@ -34,9 +38,9 @@ public class CachedThreadSchedulerTest extends AbstractSchedulerConcurrencyTests
     @Test
     public final void testIOScheduler() {
 
-        Flowable<Integer> o1 = Flowable.just(1, 2, 3, 4, 5);
-        Flowable<Integer> o2 = Flowable.just(6, 7, 8, 9, 10);
-        Flowable<String> o = Flowable.merge(o1, o2).map(new Function<Integer, String>() {
+        Flowable<Integer> f1 = Flowable.just(1, 2, 3, 4, 5);
+        Flowable<Integer> f2 = Flowable.just(6, 7, 8, 9, 10);
+        Flowable<String> f = Flowable.merge(f1, f2).map(new Function<Integer, String>() {
 
             @Override
             public String apply(Integer t) {
@@ -45,7 +49,7 @@ public class CachedThreadSchedulerTest extends AbstractSchedulerConcurrencyTests
             }
         });
 
-        o.subscribeOn(Schedulers.io()).blockingForEach(new Consumer<String>() {
+        f.subscribeOn(Schedulers.io()).blockingForEach(new Consumer<String>() {
 
             @Override
             public void accept(String t) {
@@ -81,4 +85,47 @@ public class CachedThreadSchedulerTest extends AbstractSchedulerConcurrencyTests
         }
     }
 
+    @Test
+    public void workerDisposed() {
+        Worker w = Schedulers.io().createWorker();
+
+        assertFalse(((Disposable)w).isDisposed());
+
+        w.dispose();
+
+        assertTrue(((Disposable)w).isDisposed());
+    }
+
+    @Test
+    public void shutdownRejects() {
+        final int[] calls = { 0 };
+
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                calls[0]++;
+            }
+        };
+
+        IoScheduler s = new IoScheduler();
+        s.shutdown();
+        s.shutdown();
+
+        s.scheduleDirect(r);
+
+        s.scheduleDirect(r, 1, TimeUnit.SECONDS);
+
+        s.schedulePeriodicallyDirect(r, 1, 1, TimeUnit.SECONDS);
+
+        Worker w = s.createWorker();
+        w.dispose();
+
+        assertEquals(Disposables.disposed(), w.schedule(r));
+
+        assertEquals(Disposables.disposed(), w.schedule(r, 1, TimeUnit.SECONDS));
+
+        assertEquals(Disposables.disposed(), w.schedulePeriodically(r, 1, 1, TimeUnit.SECONDS));
+
+        assertEquals(0, calls[0]);
+    }
 }

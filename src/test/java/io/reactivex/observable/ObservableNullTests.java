@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -368,11 +368,11 @@ public class ObservableNullTests {
         FutureTask<Object> f = new FutureTask<Object>(Functions.EMPTY_RUNNABLE, null);
         f.run();
 
-        TestObserver<Object> ts = new TestObserver<Object>();
-        Observable.fromFuture(f).subscribe(ts);
-        ts.assertNoValues();
-        ts.assertNotComplete();
-        ts.assertError(NullPointerException.class);
+        TestObserver<Object> to = new TestObserver<Object>();
+        Observable.fromFuture(f).subscribe(to);
+        to.assertNoValues();
+        to.assertNotComplete();
+        to.assertError(NullPointerException.class);
     }
 
     @Test(expected = NullPointerException.class)
@@ -546,7 +546,7 @@ public class ObservableNullTests {
 
     @Test(expected = NullPointerException.class)
     public void intervalRangeUnitNull() {
-        Observable.intervalRange(1,1, 1, 1, null);
+        Observable.intervalRange(1, 1, 1, 1, null);
     }
 
     @Test(expected = NullPointerException.class)
@@ -1088,7 +1088,7 @@ public class ObservableNullTests {
 
     @Test(expected = NullPointerException.class)
     public void concatWithNull() {
-        just1.concatWith(null);
+        just1.concatWith((ObservableSource<Integer>)null);
     }
 
     @Test(expected = NullPointerException.class)
@@ -1257,14 +1257,14 @@ public class ObservableNullTests {
         just1.distinctUntilChanged((BiPredicate<Object, Object>)null);
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void distinctUntilChangedFunctionReturnsNull() {
-        just1.distinctUntilChanged(new Function<Integer, Object>() {
+        Observable.range(1, 2).distinctUntilChanged(new Function<Integer, Object>() {
             @Override
             public Object apply(Integer v) {
                 return null;
             }
-        }).blockingSubscribe();
+        }).test().assertResult(1);
     }
 
     @Test(expected = NullPointerException.class)
@@ -1301,7 +1301,7 @@ public class ObservableNullTests {
     public void doOnLifecycleOnDisposeNull() {
         just1.doOnLifecycle(new Consumer<Disposable>() {
             @Override
-            public void accept(Disposable s) { }
+            public void accept(Disposable d) { }
         }, null);
     }
 
@@ -1406,6 +1406,7 @@ public class ObservableNullTests {
     }
 
     @Test(expected = NullPointerException.class)
+    @Ignore("No longer crashes with NPE but signals it; tested elsewhere.")
     public void flatMapNotificationOnErrorReturnsNull() {
         Observable.error(new TestException()).flatMap(new Function<Object, Observable<Integer>>() {
             @Override
@@ -1661,7 +1662,7 @@ public class ObservableNullTests {
     public void liftReturnsNull() {
         just1.lift(new ObservableOperator<Object, Integer>() {
             @Override
-            public Observer<? super Integer> apply(Observer<? super Object> s) {
+            public Observer<? super Integer> apply(Observer<? super Object> observer) {
                 return null;
             }
         }).blockingSubscribe();
@@ -1684,7 +1685,7 @@ public class ObservableNullTests {
 
     @Test(expected = NullPointerException.class)
     public void mergeWithNull() {
-        just1.mergeWith(null);
+        just1.mergeWith((ObservableSource<Integer>)null);
     }
 
     @Test(expected = NullPointerException.class)
@@ -2408,6 +2409,11 @@ public class ObservableNullTests {
     }
 
     @Test(expected = NullPointerException.class)
+    public void asNull() {
+        just1.as(null);
+    }
+
+    @Test(expected = NullPointerException.class)
     public void toListNull() {
         just1.toList(null);
     }
@@ -2427,8 +2433,8 @@ public class ObservableNullTests {
         just1.toSortedList(null);
     }
 
-    @Test
-    public void toMapKeyNullAllowed() {
+    @Test(expected = NullPointerException.class)
+    public void toMapKeyNull() {
         just1.toMap(null);
     }
 
@@ -2761,7 +2767,6 @@ public class ObservableNullTests {
             }
         });
     }
-
 
     @Test(expected = NullPointerException.class)
     public void zipWithCombinerNull() {

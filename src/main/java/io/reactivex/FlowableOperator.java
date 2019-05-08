@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,9 +13,8 @@
 
 package io.reactivex;
 
+import io.reactivex.annotations.*;
 import org.reactivestreams.Subscriber;
-
-import io.reactivex.functions.Function;
 
 /**
  * Interface to map/wrap a downstream subscriber to an upstream subscriber.
@@ -23,6 +22,13 @@ import io.reactivex.functions.Function;
  * @param <Downstream> the value type of the downstream
  * @param <Upstream> the value type of the upstream
  */
-public interface FlowableOperator<Downstream, Upstream> extends Function<Subscriber<? super Downstream>, Subscriber<? super Upstream>> {
-
+public interface FlowableOperator<Downstream, Upstream> {
+    /**
+     * Applies a function to the child Subscriber and returns a new parent Subscriber.
+     * @param subscriber the child Subscriber instance
+     * @return the parent Subscriber instance
+     * @throws Exception on failure
+     */
+    @NonNull
+    Subscriber<? super Upstream> apply(@NonNull Subscriber<? super Downstream> subscriber) throws Exception;
 }

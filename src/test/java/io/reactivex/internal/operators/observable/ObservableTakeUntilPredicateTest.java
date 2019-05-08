@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,14 +13,21 @@
 
 package io.reactivex.internal.operators.observable;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+
+import java.util.List;
 
 import org.junit.Test;
 
 import io.reactivex.*;
+import io.reactivex.disposables.Disposables;
 import io.reactivex.exceptions.TestException;
-import io.reactivex.functions.Predicate;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.subjects.PublishSubject;
 ;
 
 public class ObservableTakeUntilPredicateTest {
@@ -39,6 +46,7 @@ public class ObservableTakeUntilPredicateTest {
         verify(o, never()).onError(any(Throwable.class));
         verify(o).onComplete();
     }
+
     @Test
     public void takeAll() {
         Observer<Object> o = TestHelper.mockObserver();
@@ -55,6 +63,7 @@ public class ObservableTakeUntilPredicateTest {
         verify(o, never()).onError(any(Throwable.class));
         verify(o).onComplete();
     }
+
     @Test
     public void takeFirst() {
         Observer<Object> o = TestHelper.mockObserver();
@@ -71,6 +80,7 @@ public class ObservableTakeUntilPredicateTest {
         verify(o, never()).onError(any(Throwable.class));
         verify(o).onComplete();
     }
+
     @Test
     public void takeSome() {
         Observer<Object> o = TestHelper.mockObserver();
@@ -89,6 +99,7 @@ public class ObservableTakeUntilPredicateTest {
         verify(o, never()).onError(any(Throwable.class));
         verify(o).onComplete();
     }
+
     @Test
     public void functionThrows() {
         Observer<Object> o = TestHelper.mockObserver();
@@ -107,6 +118,7 @@ public class ObservableTakeUntilPredicateTest {
         verify(o).onError(any(TestException.class));
         verify(o, never()).onComplete();
     }
+
     @Test
     public void sourceThrows() {
         Observer<Object> o = TestHelper.mockObserver();
@@ -129,7 +141,7 @@ public class ObservableTakeUntilPredicateTest {
 
     @Test
     public void testErrorIncludesLastValueAsCause() {
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
         final TestException e = new TestException("Forced failure");
         Predicate<String> predicate = (new Predicate<String>() {
             @Override
@@ -137,12 +149,51 @@ public class ObservableTakeUntilPredicateTest {
                     throw e;
             }
         });
-        Observable.just("abc").takeUntil(predicate).subscribe(ts);
+        Observable.just("abc").takeUntil(predicate).subscribe(to);
 
-        ts.assertTerminated();
-        ts.assertNotComplete();
-        ts.assertError(TestException.class);
+        to.assertTerminated();
+        to.assertNotComplete();
+        to.assertError(TestException.class);
         // FIXME last cause value is not saved
 //        assertTrue(ts.errors().get(0).getCause().getMessage().contains("abc"));
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishSubject.create().takeUntil(Functions.alwaysFalse()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.takeUntil(Functions.alwaysFalse());
+            }
+        });
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onComplete();
+                    observer.onNext(1);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .takeUntil(Functions.alwaysFalse())
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

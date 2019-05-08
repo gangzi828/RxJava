@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -30,32 +30,40 @@ public final class SingleDoOnSuccess<T> extends Single<T> {
     }
 
     @Override
-    protected void subscribeActual(final SingleObserver<? super T> s) {
+    protected void subscribeActual(final SingleObserver<? super T> observer) {
 
-        source.subscribe(new SingleObserver<T>() {
-            @Override
-            public void onSubscribe(Disposable d) {
-                s.onSubscribe(d);
-            }
-
-            @Override
-            public void onSuccess(T value) {
-                try {
-                    onSuccess.accept(value);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    s.onError(ex);
-                    return;
-                }
-                s.onSuccess(value);
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                s.onError(e);
-            }
-
-        });
+        source.subscribe(new DoOnSuccess(observer));
     }
 
+    final class DoOnSuccess implements SingleObserver<T> {
+
+        final SingleObserver<? super T> downstream;
+
+        DoOnSuccess(SingleObserver<? super T> observer) {
+            this.downstream = observer;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            downstream.onSubscribe(d);
+        }
+
+        @Override
+        public void onSuccess(T value) {
+            try {
+                onSuccess.accept(value);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                downstream.onError(ex);
+                return;
+            }
+            downstream.onSuccess(value);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            downstream.onError(e);
+        }
+
+    }
 }

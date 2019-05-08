@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,9 +14,11 @@
 package io.reactivex.internal.operators.completable;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.*;
-import io.reactivex.disposables.*;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.internal.disposables.DisposableHelper;
 
 public final class CompletableDelay extends Completable {
 
@@ -39,39 +41,72 @@ public final class CompletableDelay extends Completable {
     }
 
     @Override
-    protected void subscribeActual(final CompletableObserver s) {
-        final CompositeDisposable set = new CompositeDisposable();
-
-        source.subscribe(new CompletableObserver() {
-
-
-            @Override
-            public void onComplete() {
-                set.add(scheduler.scheduleDirect(new Runnable() {
-                    @Override
-                    public void run() {
-                        s.onComplete();
-                    }
-                }, delay, unit));
-            }
-
-            @Override
-            public void onError(final Throwable e) {
-                set.add(scheduler.scheduleDirect(new Runnable() {
-                    @Override
-                    public void run() {
-                        s.onError(e);
-                    }
-                }, delayError ? delay : 0, unit));
-            }
-
-            @Override
-            public void onSubscribe(Disposable d) {
-                set.add(d);
-                s.onSubscribe(set);
-            }
-
-        });
+    protected void subscribeActual(final CompletableObserver observer) {
+        source.subscribe(new Delay(observer, delay, unit, scheduler, delayError));
     }
 
+    static final class Delay extends AtomicReference<Disposable>
+    implements CompletableObserver, Runnable, Disposable {
+
+        private static final long serialVersionUID = 465972761105851022L;
+
+        final CompletableObserver downstream;
+
+        final long delay;
+
+        final TimeUnit unit;
+
+        final Scheduler scheduler;
+
+        final boolean delayError;
+
+        Throwable error;
+
+        Delay(CompletableObserver downstream, long delay, TimeUnit unit, Scheduler scheduler, boolean delayError) {
+            this.downstream = downstream;
+            this.delay = delay;
+            this.unit = unit;
+            this.scheduler = scheduler;
+            this.delayError = delayError;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.setOnce(this, d)) {
+                downstream.onSubscribe(this);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            DisposableHelper.replace(this, scheduler.scheduleDirect(this, delay, unit));
+        }
+
+        @Override
+        public void onError(final Throwable e) {
+            error = e;
+            DisposableHelper.replace(this, scheduler.scheduleDirect(this, delayError ? delay : 0, unit));
+        }
+
+        @Override
+        public void dispose() {
+            DisposableHelper.dispose(this);
+        }
+
+        @Override
+        public boolean isDisposed() {
+            return DisposableHelper.isDisposed(get());
+        }
+
+        @Override
+        public void run() {
+            Throwable e = error;
+            error = null;
+            if (e != null) {
+                downstream.onError(e);
+            } else {
+                downstream.onComplete();
+            }
+        }
+    }
 }

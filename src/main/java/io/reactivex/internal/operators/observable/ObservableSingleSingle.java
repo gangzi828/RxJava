@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -21,11 +21,11 @@ import java.util.NoSuchElementException;
 
 public final class ObservableSingleSingle<T> extends Single<T> {
 
-    final ObservableSource<T> source;
+    final ObservableSource<? extends T> source;
 
     final T defaultValue;
 
-    public ObservableSingleSingle(ObservableSource<T> source, T defaultValue) {
+    public ObservableSingleSingle(ObservableSource<? extends T> source, T defaultValue) {
         this.source = source;
         this.defaultValue = defaultValue;
     }
@@ -36,40 +36,38 @@ public final class ObservableSingleSingle<T> extends Single<T> {
     }
 
     static final class SingleElementObserver<T> implements Observer<T>, Disposable {
-        final SingleObserver<? super T> actual;
+        final SingleObserver<? super T> downstream;
 
         final T defaultValue;
 
-        Disposable s;
+        Disposable upstream;
 
         T value;
 
         boolean done;
 
         SingleElementObserver(SingleObserver<? super T> actual, T defaultValue) {
-            this.actual = actual;
+            this.downstream = actual;
             this.defaultValue = defaultValue;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -78,8 +76,8 @@ public final class ObservableSingleSingle<T> extends Single<T> {
             }
             if (value != null) {
                 done = true;
-                s.dispose();
-                actual.onError(new IllegalArgumentException("Sequence contains more than one element!"));
+                upstream.dispose();
+                downstream.onError(new IllegalArgumentException("Sequence contains more than one element!"));
                 return;
             }
             value = t;
@@ -92,7 +90,7 @@ public final class ObservableSingleSingle<T> extends Single<T> {
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -108,9 +106,9 @@ public final class ObservableSingleSingle<T> extends Single<T> {
             }
 
             if (v != null) {
-                actual.onSuccess(v);
+                downstream.onSuccess(v);
             } else {
-                actual.onError(new NoSuchElementException());
+                downstream.onError(new NoSuchElementException());
             }
         }
     }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.*;
@@ -24,10 +25,12 @@ import org.junit.Test;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.Flowable;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.processors.PublishProcessor;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 
@@ -35,19 +38,19 @@ public class FlowableRepeatTest {
 
     @Test(timeout = 2000)
     public void testRepetition() {
-        int NUM = 10;
+        int num = 10;
         final AtomicInteger count = new AtomicInteger();
         int value = Flowable.unsafeCreate(new Publisher<Integer>() {
 
             @Override
-            public void subscribe(final Subscriber<? super Integer> o) {
-                o.onNext(count.incrementAndGet());
-                o.onComplete();
+            public void subscribe(final Subscriber<? super Integer> subscriber) {
+                subscriber.onNext(count.incrementAndGet());
+                subscriber.onComplete();
             }
         }).repeat().subscribeOn(Schedulers.computation())
-        .take(NUM).blockingLast();
+        .take(num).blockingLast();
 
-        assertEquals(NUM, value);
+        assertEquals(num, value);
     }
 
     @Test(timeout = 2000)
@@ -98,58 +101,58 @@ public class FlowableRepeatTest {
 
     @Test(timeout = 2000)
     public void testRepeatAndTake() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.just(1).repeat().take(10).subscribe(o);
+        Flowable.just(1).repeat().take(10).subscribe(subscriber);
 
-        verify(o, times(10)).onNext(1);
-        verify(o).onComplete();
-        verify(o, never()).onError(any(Throwable.class));
+        verify(subscriber, times(10)).onNext(1);
+        verify(subscriber).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test(timeout = 2000)
     public void testRepeatLimited() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.just(1).repeat(10).subscribe(o);
+        Flowable.just(1).repeat(10).subscribe(subscriber);
 
-        verify(o, times(10)).onNext(1);
-        verify(o).onComplete();
-        verify(o, never()).onError(any(Throwable.class));
+        verify(subscriber, times(10)).onNext(1);
+        verify(subscriber).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test(timeout = 2000)
     public void testRepeatError() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.error(new TestException()).repeat(10).subscribe(o);
+        Flowable.error(new TestException()).repeat(10).subscribe(subscriber);
 
-        verify(o).onError(any(TestException.class));
-        verify(o, never()).onNext(any());
-        verify(o, never()).onComplete();
+        verify(subscriber).onError(any(TestException.class));
+        verify(subscriber, never()).onNext(any());
+        verify(subscriber, never()).onComplete();
 
     }
 
     @Test(timeout = 2000)
     public void testRepeatZero() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.just(1).repeat(0).subscribe(o);
+        Flowable.just(1).repeat(0).subscribe(subscriber);
 
-        verify(o).onComplete();
-        verify(o, never()).onNext(any());
-        verify(o, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
+        verify(subscriber, never()).onNext(any());
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test(timeout = 2000)
     public void testRepeatOne() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.just(1).repeat(1).subscribe(o);
+        Flowable.just(1).repeat(1).subscribe(subscriber);
 
-        verify(o).onComplete();
-        verify(o, times(1)).onNext(any());
-        verify(o, never()).onError(any(Throwable.class));
+        verify(subscriber).onComplete();
+        verify(subscriber, times(1)).onNext(any());
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     /** Issue #2587. */
@@ -214,8 +217,8 @@ public class FlowableRepeatTest {
 
         Flowable.just(1).repeatWhen((Function)new Function<Flowable, Flowable>() {
             @Override
-            public Flowable apply(Flowable o) {
-                return o.take(2);
+            public Flowable apply(Flowable f) {
+                return f.take(2);
             }
         }).subscribe(ts);
 
@@ -233,8 +236,8 @@ public class FlowableRepeatTest {
         Flowable.just(1).subscribeOn(Schedulers.trampoline())
         .repeatWhen((Function)new Function<Flowable, Flowable>() {
             @Override
-            public Flowable apply(Flowable o) {
-                return o.take(2);
+            public Flowable apply(Flowable f) {
+                return f.take(2);
             }
         }).subscribe(ts);
 
@@ -258,6 +261,19 @@ public class FlowableRepeatTest {
     }
 
     @Test
+    public void repeatUntilCancel() {
+        Flowable.just(1)
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return true;
+            }
+        })
+        .test(2L, true)
+        .assertEmpty();
+    }
+
+    @Test
     public void repeatLongPredicateInvalid() {
         try {
             Flowable.just(1).repeat(-99);
@@ -267,4 +283,215 @@ public class FlowableRepeatTest {
         }
     }
 
+    @Test
+    public void repeatUntilError() {
+        Flowable.error(new TestException())
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return true;
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void repeatUntilFalse() {
+        Flowable.just(1)
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return true;
+            }
+        })
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void repeatUntilSupplierCrash() {
+        Flowable.just(1)
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class, 1);
+    }
+
+    @Test
+    public void shouldDisposeInnerObservable() {
+      final PublishProcessor<Object> processor = PublishProcessor.create();
+      final Disposable disposable = Flowable.just("Leak")
+          .repeatWhen(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> completions) throws Exception {
+                return completions.switchMap(new Function<Object, Flowable<Object>>() {
+                    @Override
+                    public Flowable<Object> apply(Object ignore) throws Exception {
+                        return processor;
+                    }
+                });
+            }
+        })
+          .subscribe();
+
+      assertTrue(processor.hasSubscribers());
+      disposable.dispose();
+      assertFalse(processor.hasSubscribers());
+    }
+
+    @Test
+    public void testRepeatWhen() {
+        Flowable.error(new TestException())
+        .repeatWhen(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> v) throws Exception {
+                return v.delay(10, TimeUnit.SECONDS);
+            }
+        })
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void whenTake() {
+        Flowable.range(1, 3).repeatWhen(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> handler) throws Exception {
+                return handler.take(2);
+            }
+        })
+        .test()
+        .assertResult(1, 2, 3, 1, 2, 3);
+    }
+
+    @Test
+    public void noCancelPreviousRepeat() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Flowable<Integer> source = Flowable.just(1).doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        source.repeat(5)
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void noCancelPreviousRepeatUntil() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Flowable<Integer> source = Flowable.just(1).doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        final AtomicInteger times = new AtomicInteger();
+
+        source.repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return times.getAndIncrement() == 4;
+            }
+        })
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void noCancelPreviousRepeatWhen() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Flowable<Integer> source = Flowable.just(1).doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        final AtomicInteger times = new AtomicInteger();
+
+        source.repeatWhen(new Function<Flowable<Object>, Flowable<?>>() {
+            @Override
+            public Flowable<?> apply(Flowable<Object> e) throws Exception {
+                return e.takeWhile(new Predicate<Object>() {
+                    @Override
+                    public boolean test(Object v) throws Exception {
+                        return times.getAndIncrement() < 4;
+                    }
+                });
+            }
+        })
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void repeatFloodNoSubscriptionError() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+
+        try {
+            final PublishProcessor<Integer> source = PublishProcessor.create();
+            final PublishProcessor<Integer> signaller = PublishProcessor.create();
+
+            for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+
+                TestSubscriber<Integer> ts = source.take(1)
+                .repeatWhen(new Function<Flowable<Object>, Flowable<Integer>>() {
+                    @Override
+                    public Flowable<Integer> apply(Flowable<Object> v)
+                            throws Exception {
+                        return signaller;
+                    }
+                }).test();
+
+                Runnable r1 = new Runnable() {
+                    @Override
+                    public void run() {
+                        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+                            source.onNext(1);
+                        }
+                    }
+                };
+                Runnable r2 = new Runnable() {
+                    @Override
+                    public void run() {
+                        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+                            signaller.offer(1);
+                        }
+                    }
+                };
+
+                TestHelper.race(r1, r2);
+
+                ts.dispose();
+            }
+
+            if (!errors.isEmpty()) {
+                for (Throwable e : errors) {
+                    e.printStackTrace();
+                }
+                fail(errors + "");
+            }
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
 }

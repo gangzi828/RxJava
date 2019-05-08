@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,6 +28,7 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Action;
 import io.reactivex.functions.Function;
 import io.reactivex.internal.functions.Functions;
 import io.reactivex.observers.*;
@@ -154,7 +155,6 @@ public class ObservableConcatTest {
         final AtomicReference<Thread> parent = new AtomicReference<Thread>();
         final CountDownLatch parentHasStarted = new CountDownLatch(1);
         final CountDownLatch parentHasFinished = new CountDownLatch(1);
-
 
         Observable<Observable<String>> observableOfObservables = Observable.unsafeCreate(new ObservableSource<Observable<String>>() {
 
@@ -393,17 +393,17 @@ public class ObservableConcatTest {
         final TestObservable<String> w2 = new TestObservable<String>(callOnce, okToContinue, "four", "five", "six");
 
         Observer<String> observer = TestHelper.mockObserver();
-        TestObserver<String> ts = new TestObserver<String>(observer);
+        TestObserver<String> to = new TestObserver<String>(observer);
 
         final Observable<String> concat = Observable.concat(Observable.unsafeCreate(w1), Observable.unsafeCreate(w2));
 
         try {
             // Subscribe
-            concat.subscribe(ts);
+            concat.subscribe(to);
             //Block main thread to allow Observable "w1" to complete and Observable "w2" to call onNext once.
             callOnce.await();
             // Unsubcribe
-            ts.dispose();
+            to.dispose();
             //Unblock the Observable to continue.
             okToContinue.countDown();
             w1.t.join();
@@ -435,19 +435,19 @@ public class ObservableConcatTest {
         final TestObservable<String> w2 = new TestObservable<String>(callOnce, okToContinue, "four", "five", "six");
 
         Observer<String> observer = TestHelper.mockObserver();
-        TestObserver<String> ts = new TestObserver<String>(observer);
+        TestObserver<String> to = new TestObserver<String>(observer);
 
         @SuppressWarnings("unchecked")
         TestObservable<Observable<String>> observableOfObservables = new TestObservable<Observable<String>>(Observable.unsafeCreate(w1), Observable.unsafeCreate(w2));
         Observable<String> concatF = Observable.concat(Observable.unsafeCreate(observableOfObservables));
 
-        concatF.subscribe(ts);
+        concatF.subscribe(to);
 
         try {
             //Block main thread to allow Observable "w1" to complete and Observable "w2" to call onNext exactly once.
             callOnce.await();
             //"four" from w2 has been processed by onNext()
-            ts.dispose();
+            to.dispose();
             //"five" and "six" will NOT be processed by onNext()
             //Unblock the Observable to continue.
             okToContinue.countDown();
@@ -471,7 +471,7 @@ public class ObservableConcatTest {
 
     static class TestObservable<T> implements ObservableSource<T> {
 
-        private final Disposable s = new Disposable() {
+        private final Disposable upstream = new Disposable() {
             @Override
             public void dispose() {
                     subscribed = false;
@@ -514,7 +514,7 @@ public class ObservableConcatTest {
 
         @Override
         public void subscribe(final Observer<? super T> observer) {
-            observer.onSubscribe(s);
+            observer.onSubscribe(upstream);
             t = new Thread(new Runnable() {
 
                 @Override
@@ -623,6 +623,7 @@ public class ObservableConcatTest {
         inOrder.verify(o).onSuccess(list);
         verify(o, never()).onError(any(Throwable.class));
     }
+
     @Test
     public void concatVeryLongObservableOfObservablesTakeHalf() {
         final int n = 10000;
@@ -663,21 +664,21 @@ public class ObservableConcatTest {
         Observable<String> o = Observable.unsafeCreate(new ObservableSource<String>() {
 
             @Override
-            public void subscribe(Observer<? super String> s) {
-                s.onSubscribe(Disposables.empty());
-                s.onNext("hello");
-                s.onComplete();
-                s.onComplete();
+            public void subscribe(Observer<? super String> observer) {
+                observer.onSubscribe(Disposables.empty());
+                observer.onNext("hello");
+                observer.onComplete();
+                observer.onComplete();
             }
 
         });
 
-        TestObserver<String> ts = new TestObserver<String>();
-        Observable.concat(o, o).subscribe(ts);
-        ts.awaitTerminalEvent(500, TimeUnit.MILLISECONDS);
-        ts.assertTerminated();
-        ts.assertNoErrors();
-        ts.assertValues("hello", "hello");
+        TestObserver<String> to = new TestObserver<String>();
+        Observable.concat(o, o).subscribe(to);
+        to.awaitTerminalEvent(500, TimeUnit.MILLISECONDS);
+        to.assertTerminated();
+        to.assertNoErrors();
+        to.assertValues("hello", "hello");
     }
 
     @Test(timeout = 30000)
@@ -743,7 +744,7 @@ public class ObservableConcatTest {
             if (i % 1000 == 0) {
                 System.out.println("concatMapRangeAsyncLoop > " + i);
             }
-            TestObserver<Integer> ts = new TestObserver<Integer>();
+            TestObserver<Integer> to = new TestObserver<Integer>();
             Observable.range(0, 1000)
             .concatMap(new Function<Integer, Observable<Integer>>() {
                 @Override
@@ -751,13 +752,13 @@ public class ObservableConcatTest {
                     return Observable.fromIterable(Arrays.asList(t));
                 }
             })
-            .observeOn(Schedulers.computation()).subscribe(ts);
+            .observeOn(Schedulers.computation()).subscribe(to);
 
-            ts.awaitTerminalEvent(2500, TimeUnit.MILLISECONDS);
-            ts.assertTerminated();
-            ts.assertNoErrors();
-            assertEquals(1000, ts.valueCount());
-            assertEquals((Integer)999, ts.values().get(999));
+            to.awaitTerminalEvent(2500, TimeUnit.MILLISECONDS);
+            to.assertTerminated();
+            to.assertNoErrors();
+            assertEquals(1000, to.valueCount());
+            assertEquals((Integer)999, to.values().get(999));
         }
     }
 
@@ -958,4 +959,239 @@ public class ObservableConcatTest {
 
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscription() {
+        final int[] calls = { 0 };
+
+        Observable<Integer> source = Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(ObservableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        });
+
+        Observable.concatArray(source, source).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionDelayError() {
+        final int[] calls = { 0 };
+
+        Observable<Integer> source = Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(ObservableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        });
+
+        Observable.concatArrayDelayError(source, source).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionIterable() {
+        final int[] calls = { 0 };
+
+        Observable<Integer> source = Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(ObservableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        });
+
+        Observable.concat(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noSubsequentSubscriptionDelayErrorIterable() {
+        final int[] calls = { 0 };
+
+        Observable<Integer> source = Observable.create(new ObservableOnSubscribe<Integer>() {
+            @Override
+            public void subscribe(ObservableEmitter<Integer> s) throws Exception {
+                calls[0]++;
+                s.onNext(1);
+                s.onComplete();
+            }
+        });
+
+        Observable.concatDelayError(Arrays.asList(source, source)).firstElement()
+        .test()
+        .assertResult(1);
+
+        assertEquals(1, calls[0]);
+    }
+
+    @Test
+    public void concatReportsDisposedOnComplete() {
+        final Disposable[] disposable = { null };
+
+        Observable.concat(Observable.just(1), Observable.just(2))
+        .subscribe(new Observer<Integer>() {
+
+            @Override
+            public void onSubscribe(Disposable d) {
+                disposable[0] = d;
+            }
+
+            @Override
+            public void onNext(Integer t) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        assertTrue(disposable[0].isDisposed());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void concatReportsDisposedOnCompleteDelayError() {
+        final Disposable[] disposable = { null };
+
+        Observable.concatArrayDelayError(Observable.just(1), Observable.just(2))
+        .subscribe(new Observer<Integer>() {
+
+            @Override
+            public void onSubscribe(Disposable d) {
+                disposable[0] = d;
+            }
+
+            @Override
+            public void onNext(Integer t) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        assertTrue(disposable[0].isDisposed());
+    }
+
+    @Test
+    public void concatReportsDisposedOnError() {
+        final Disposable[] disposable = { null };
+
+        Observable.concat(Observable.just(1), Observable.<Integer>error(new TestException()))
+        .subscribe(new Observer<Integer>() {
+
+            @Override
+            public void onSubscribe(Disposable d) {
+                disposable[0] = d;
+            }
+
+            @Override
+            public void onNext(Integer t) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        assertTrue(disposable[0].isDisposed());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void concatReportsDisposedOnErrorDelayError() {
+        final Disposable[] disposable = { null };
+
+        Observable.concatArrayDelayError(Observable.just(1), Observable.<Integer>error(new TestException()))
+        .subscribe(new Observer<Integer>() {
+
+            @Override
+            public void onSubscribe(Disposable d) {
+                disposable[0] = d;
+            }
+
+            @Override
+            public void onNext(Integer t) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        assertTrue(disposable[0].isDisposed());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noCancelPreviousArray() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Observable<Integer> source = Observable.just(1).doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        Observable.concatArray(source, source, source, source, source)
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void noCancelPreviousIterable() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Observable<Integer> source = Observable.just(1).doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        Observable.concat(Arrays.asList(source, source, source, source, source))
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,19 +14,19 @@
 package io.reactivex.subjects;
 
 import io.reactivex.Observer;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.exceptions.Exceptions;
-import io.reactivex.functions.Predicate;
 import io.reactivex.internal.util.*;
+import io.reactivex.internal.util.AppendOnlyLinkedArrayList.NonThrowingPredicate;
 import io.reactivex.plugins.RxJavaPlugins;
 
 /**
- * Serializes calls to the Subscriber methods.
- * <p>All other Publisher and Subject methods are thread-safe by design.
+ * Serializes calls to the Observer methods.
+ * <p>All other Observable and Subject methods are thread-safe by design.
  *
  * @param <T> the item value type
  */
-/* public */ final class SerializedSubject<T> extends Subject<T> {
+/* public */ final class SerializedSubject<T> extends Subject<T> implements NonThrowingPredicate<Object> {
     /** The actual subscriber to serialize Subscriber calls to. */
     final Subject<T> actual;
     /** Indicates an emission is going on, guarded by this. */
@@ -49,10 +49,36 @@ import io.reactivex.plugins.RxJavaPlugins;
         actual.subscribe(observer);
     }
 
-
     @Override
-    public void onSubscribe(Disposable s) {
-        // NO-OP
+    public void onSubscribe(Disposable d) {
+        boolean cancel;
+        if (!done) {
+            synchronized (this) {
+                if (done) {
+                    cancel = true;
+                } else {
+                    if (emitting) {
+                        AppendOnlyLinkedArrayList<Object> q = queue;
+                        if (q == null) {
+                            q = new AppendOnlyLinkedArrayList<Object>(4);
+                            queue = q;
+                        }
+                        q.add(NotificationLite.disposable(d));
+                        return;
+                    }
+                    emitting = true;
+                    cancel = false;
+                }
+            }
+        } else {
+            cancel = true;
+        }
+        if (cancel) {
+            d.dispose();
+        } else {
+            actual.onSubscribe(d);
+            emitLoop();
+        }
     }
 
     @Override
@@ -147,26 +173,13 @@ import io.reactivex.plugins.RxJavaPlugins;
                 }
                 queue = null;
             }
-            try {
-                q.forEachWhile(consumer);
-            } catch (Throwable ex) {
-                Exceptions.throwIfFatal(ex);
-                actual.onError(ex);
-                return;
-            }
+            q.forEachWhile(this);
         }
     }
 
-    final Predicate<Object> consumer = new Predicate<Object>() {
-        @Override
-        public boolean test(Object v) {
-            return accept(v);
-        }
-    };
-
-    /** Delivers the notification to the actual subscriber. */
-    boolean accept(Object o) {
-        return NotificationLite.accept(o, actual);
+    @Override
+    public boolean test(Object o) {
+        return NotificationLite.acceptFull(o, actual);
     }
 
     @Override
@@ -180,6 +193,7 @@ import io.reactivex.plugins.RxJavaPlugins;
     }
 
     @Override
+    @Nullable
     public Throwable getThrowable() {
         return actual.getThrowable();
     }

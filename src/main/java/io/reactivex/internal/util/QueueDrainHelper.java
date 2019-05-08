@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,15 +13,15 @@
 package io.reactivex.internal.util;
 
 import java.util.Queue;
-import java.util.concurrent.atomic.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.reactivestreams.*;
 
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.exceptions.Exceptions;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.BooleanSupplier;
-import io.reactivex.internal.fuseable.SimpleQueue;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.queue.*;
 
 /**
@@ -31,56 +31,6 @@ public final class QueueDrainHelper {
     /** Utility class. */
     private QueueDrainHelper() {
         throw new IllegalStateException("No instances!");
-    }
-
-    public static <T, U> void drainLoop(SimpleQueue<T> q, Subscriber<? super U> a, boolean delayError, QueueDrain<T, U> qd) {
-
-        int missed = 1;
-
-        for (;;) {
-            if (checkTerminated(qd.done(), q.isEmpty(), a, delayError, q, qd)) {
-                return;
-            }
-
-            long r = qd.requested();
-            long e = 0L;
-
-            while (e != r) {
-                boolean d = qd.done();
-                T v;
-
-                try {
-                    v = q.poll();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    a.onError(ex);
-                    return;
-                }
-
-                boolean empty = v == null;
-
-                if (checkTerminated(d, empty, a, delayError, q, qd)) {
-                    return;
-                }
-
-                if (empty) {
-                    break;
-                }
-
-                if (qd.accept(a, v)) {
-                    e++;
-                }
-            }
-
-            if (e != 0L && r != Long.MAX_VALUE) {
-                qd.produced(e);
-            }
-
-            missed = qd.leave(-missed);
-            if (missed == 0) {
-                break;
-            }
-        }
     }
 
     /**
@@ -93,7 +43,7 @@ public final class QueueDrainHelper {
      * @param dispose the disposable to call when termination happens and cleanup is necessary
      * @param qd the QueueDrain instance that gives status information to the drain logic
      */
-    public static <T, U> void drainMaxLoop(SimpleQueue<T> q, Subscriber<? super U> a, boolean delayError,
+    public static <T, U> void drainMaxLoop(SimplePlainQueue<T> q, Subscriber<? super U> a, boolean delayError,
             Disposable dispose, QueueDrain<T, U> qd) {
         int missed = 1;
 
@@ -101,15 +51,7 @@ public final class QueueDrainHelper {
             for (;;) {
                 boolean d = qd.done();
 
-                T v;
-
-                try {
-                    v = q.poll();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    a.onError(ex);
-                    return;
-                }
+                T v = q.poll();
 
                 boolean empty = v == null;
 
@@ -136,7 +78,7 @@ public final class QueueDrainHelper {
                     if (dispose != null) {
                         dispose.dispose();
                     }
-                    a.onError(new IllegalStateException("Could not emit value due to lack of requests."));
+                    a.onError(new MissingBackpressureException("Could not emit value due to lack of requests."));
                     return;
                 }
             }
@@ -183,7 +125,7 @@ public final class QueueDrainHelper {
         return false;
     }
 
-    public static <T, U> void drainLoop(SimpleQueue<T> q, Observer<? super U> a, boolean delayError, Disposable dispose, ObservableQueueDrain<T, U> qd) {
+    public static <T, U> void drainLoop(SimplePlainQueue<T> q, Observer<? super U> a, boolean delayError, Disposable dispose, ObservableQueueDrain<T, U> qd) {
 
         int missed = 1;
 
@@ -194,16 +136,7 @@ public final class QueueDrainHelper {
 
             for (;;) {
                 boolean d = qd.done();
-                T v;
-
-                try {
-                    v = q.poll();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    a.onError(ex);
-                    return;
-                }
-
+                T v = q.poll();
                 boolean empty = v == null;
 
                 if (checkTerminated(d, empty, a, delayError, q, dispose, qd)) {
@@ -225,7 +158,7 @@ public final class QueueDrainHelper {
     }
 
     public static <T, U> boolean checkTerminated(boolean d, boolean empty,
-            Observer<?> s, boolean delayError, SimpleQueue<?> q, Disposable disposable, ObservableQueueDrain<T, U> qd) {
+            Observer<?> observer, boolean delayError, SimpleQueue<?> q, Disposable disposable, ObservableQueueDrain<T, U> qd) {
         if (qd.cancelled()) {
             q.clear();
             disposable.dispose();
@@ -235,12 +168,14 @@ public final class QueueDrainHelper {
         if (d) {
             if (delayError) {
                 if (empty) {
-                    disposable.dispose();
+                    if (disposable != null) {
+                        disposable.dispose();
+                    }
                     Throwable err = qd.error();
                     if (err != null) {
-                        s.onError(err);
+                        observer.onError(err);
                     } else {
-                        s.onComplete();
+                        observer.onComplete();
                     }
                     return true;
                 }
@@ -248,13 +183,17 @@ public final class QueueDrainHelper {
                 Throwable err = qd.error();
                 if (err != null) {
                     q.clear();
-                    disposable.dispose();
-                    s.onError(err);
+                    if (disposable != null) {
+                        disposable.dispose();
+                    }
+                    observer.onError(err);
                     return true;
                 } else
                 if (empty) {
-                    disposable.dispose();
-                    s.onComplete();
+                    if (disposable != null) {
+                        disposable.dispose();
+                    }
+                    observer.onComplete();
                     return true;
                 }
             }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.flowable;
 
 import java.util.NoSuchElementException;
+
 import org.reactivestreams.*;
 
 import io.reactivex.*;
@@ -44,38 +45,38 @@ public final class FlowableLastSingle<T> extends Single<T> {
         source.subscribe(new LastSubscriber<T>(observer, defaultItem));
     }
 
-    static final class LastSubscriber<T> implements Subscriber<T>, Disposable {
+    static final class LastSubscriber<T> implements FlowableSubscriber<T>, Disposable {
 
-        final SingleObserver<? super T> actual;
+        final SingleObserver<? super T> downstream;
 
         final T defaultItem;
 
-        Subscription s;
+        Subscription upstream;
 
         T item;
 
         LastSubscriber(SingleObserver<? super T> actual, T defaultItem) {
-            this.actual = actual;
+            this.downstream = actual;
             this.defaultItem = defaultItem;
         }
 
         @Override
         public void dispose() {
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public boolean isDisposed() {
-            return s == SubscriptionHelper.CANCELLED;
+            return upstream == SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(Long.MAX_VALUE);
             }
@@ -88,25 +89,25 @@ public final class FlowableLastSingle<T> extends Single<T> {
 
         @Override
         public void onError(Throwable t) {
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
             item = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
             T v = item;
             if (v != null) {
                 item = null;
-                actual.onSuccess(v);
+                downstream.onSuccess(v);
             } else {
                 v = defaultItem;
 
                 if (v != null) {
-                    actual.onSuccess(v);
+                    downstream.onSuccess(v);
                 } else {
-                    actual.onError(new NoSuchElementException());
+                    downstream.onError(new NoSuchElementException());
                 }
             }
         }

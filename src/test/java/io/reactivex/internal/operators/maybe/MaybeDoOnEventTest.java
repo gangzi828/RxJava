@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,10 +13,17 @@
 
 package io.reactivex.internal.operators.maybe;
 
+import static org.junit.Assert.assertTrue;
+
+import java.util.List;
+
 import org.junit.Test;
 
 import io.reactivex.*;
+import io.reactivex.disposables.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.subjects.PublishSubject;
 
 public class MaybeDoOnEventTest {
@@ -44,5 +51,37 @@ public class MaybeDoOnEventTest {
                 });
             }
         });
+    }
+
+    @Test
+    public void onSubscribeCrash() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            final Disposable bs = Disposables.empty();
+
+            new Maybe<Integer>() {
+                @Override
+                protected void subscribeActual(MaybeObserver<? super Integer> observer) {
+                    observer.onSubscribe(bs);
+                    observer.onError(new TestException("Second"));
+                    observer.onComplete();
+                    observer.onSuccess(1);
+                }
+            }
+            .doOnSubscribe(new Consumer<Disposable>() {
+                @Override
+                public void accept(Disposable d) throws Exception {
+                    throw new TestException("First");
+                }
+            })
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            assertTrue(bs.isDisposed());
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

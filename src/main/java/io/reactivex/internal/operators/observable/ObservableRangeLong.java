@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,10 +12,9 @@
  */
 package io.reactivex.internal.operators.observable;
 
-import io.reactivex.Observable;
-import io.reactivex.Observer;
-import io.reactivex.internal.fuseable.QueueDisposable;
-import java.util.concurrent.atomic.AtomicLong;
+import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.internal.observers.BasicIntQueueDisposable;
 
 public final class ObservableRangeLong extends Observable<Long> {
     private final long start;
@@ -34,12 +33,11 @@ public final class ObservableRangeLong extends Observable<Long> {
     }
 
     static final class RangeDisposable
-    extends AtomicLong
-    implements QueueDisposable<Long> {
+    extends BasicIntQueueDisposable<Long> {
 
         private static final long serialVersionUID = 396518478098735504L;
 
-        final Observer<? super Long> actual;
+        final Observer<? super Long> downstream;
 
         final long end;
 
@@ -48,7 +46,7 @@ public final class ObservableRangeLong extends Observable<Long> {
         boolean fused;
 
         RangeDisposable(Observer<? super Long> actual, long start, long end) {
-            this.actual = actual;
+            this.downstream = actual;
             this.index = start;
             this.end = end;
         }
@@ -57,7 +55,7 @@ public final class ObservableRangeLong extends Observable<Long> {
             if (fused) {
                 return;
             }
-            Observer<? super Long> actual = this.actual;
+            Observer<? super Long> actual = this.downstream;
             long e = end;
             for (long i = index; i != e && get() == 0; i++) {
                 actual.onNext(i);
@@ -68,16 +66,7 @@ public final class ObservableRangeLong extends Observable<Long> {
             }
         }
 
-        @Override
-        public boolean offer(Long value) {
-            throw new UnsupportedOperationException("Should not be called!");
-        }
-
-        @Override
-        public boolean offer(Long v1, Long v2) {
-            throw new UnsupportedOperationException("Should not be called!");
-        }
-
+        @Nullable
         @Override
         public Long poll() throws Exception {
             long i = index;

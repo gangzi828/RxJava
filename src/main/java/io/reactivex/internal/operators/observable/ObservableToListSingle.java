@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.*;
 import java.util.concurrent.Callable;
 
@@ -22,6 +23,7 @@ import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.internal.fuseable.FuseToObservable;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -32,15 +34,10 @@ extends Single<U> implements FuseToObservable<U> {
 
     final Callable<U> collectionSupplier;
 
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public ObservableToListSingle(ObservableSource<T> source, final int defaultCapacityHint) {
         this.source = source;
-        this.collectionSupplier = new Callable<U>() {
-            @Override
-            @SuppressWarnings("unchecked")
-            public U call() throws Exception {
-                return (U)new ArrayList<T>(defaultCapacityHint);
-            }
-        };
+        this.collectionSupplier = (Callable)Functions.createArrayList(defaultCapacityHint);
     }
 
     public ObservableToListSingle(ObservableSource<T> source, Callable<U> collectionSupplier) {
@@ -52,7 +49,7 @@ extends Single<U> implements FuseToObservable<U> {
     public void subscribeActual(SingleObserver<? super U> t) {
         U coll;
         try {
-            coll = collectionSupplier.call();
+            coll = ObjectHelper.requireNonNull(collectionSupplier.call(), "The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             EmptyDisposable.error(e, t);
@@ -67,36 +64,34 @@ extends Single<U> implements FuseToObservable<U> {
     }
 
     static final class ToListObserver<T, U extends Collection<? super T>> implements Observer<T>, Disposable {
-        final SingleObserver<? super U> actual;
+        final SingleObserver<? super U> downstream;
 
         U collection;
 
-        Disposable s;
+        Disposable upstream;
 
         ToListObserver(SingleObserver<? super U> actual, U collection) {
-            this.actual = actual;
+            this.downstream = actual;
             this.collection = collection;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -106,14 +101,14 @@ extends Single<U> implements FuseToObservable<U> {
         @Override
         public void onError(Throwable t) {
             collection = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             U c = collection;
             collection = null;
-            actual.onSuccess(c);
+            downstream.onSuccess(c);
         }
     }
 }

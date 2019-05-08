@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -37,18 +37,18 @@ public final class ObservableIgnoreElementsCompletable<T> extends Completable im
     }
 
     static final class IgnoreObservable<T> implements Observer<T>, Disposable {
-        final CompletableObserver actual;
+        final CompletableObserver downstream;
 
-        Disposable d;
+        Disposable upstream;
 
         IgnoreObservable(CompletableObserver t) {
-            this.actual = t;
+            this.downstream = t;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            this.d = s;
-            actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            this.upstream = d;
+            downstream.onSubscribe(this);
         }
 
         @Override
@@ -58,22 +58,22 @@ public final class ObservableIgnoreElementsCompletable<T> extends Completable im
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void dispose() {
-            d.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
     }
 

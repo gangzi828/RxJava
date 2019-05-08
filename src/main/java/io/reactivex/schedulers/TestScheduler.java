@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,6 +17,7 @@ import java.util.Queue;
 import java.util.concurrent.*;
 
 import io.reactivex.Scheduler;
+import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.*;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.functions.ObjectHelper;
@@ -33,6 +34,25 @@ public final class TestScheduler extends Scheduler {
     long counter;
     // Storing time in nanoseconds internally.
     volatile long time;
+
+    /**
+     * Creates a new TestScheduler with initial virtual time of zero.
+     */
+    public TestScheduler() {
+        // No-op.
+    }
+
+    /**
+     * Creates a new TestScheduler with the specified initial virtual time.
+     *
+     * @param delayTime
+     *          the point in time to move the Scheduler's clock to
+     * @param unit
+     *          the units of time that {@code delayTime} is expressed in
+     */
+    public TestScheduler(long delayTime, TimeUnit unit) {
+        time = unit.toNanos(delayTime);
+    }
 
     static final class TimedRunnable implements Comparable<TimedRunnable> {
 
@@ -63,7 +83,7 @@ public final class TestScheduler extends Scheduler {
     }
 
     @Override
-    public long now(TimeUnit unit) {
+    public long now(@NonNull TimeUnit unit) {
         return unit.convert(time, TimeUnit.NANOSECONDS);
     }
 
@@ -101,14 +121,14 @@ public final class TestScheduler extends Scheduler {
     }
 
     private void triggerActions(long targetTimeInNanoseconds) {
-        while (!queue.isEmpty()) {
+        for (;;) {
             TimedRunnable current = queue.peek();
-            if (current.time > targetTimeInNanoseconds) {
+            if (current == null || current.time > targetTimeInNanoseconds) {
                 break;
             }
             // if scheduled time is 0 (immediate) use current virtual time
             time = current.time == 0 ? time : current.time;
-            queue.remove();
+            queue.remove(current);
 
             // Only execute if not unsubscribed
             if (!current.scheduler.disposed) {
@@ -118,6 +138,7 @@ public final class TestScheduler extends Scheduler {
         time = targetTimeInNanoseconds;
     }
 
+    @NonNull
     @Override
     public Worker createWorker() {
         return new TestWorker();
@@ -137,41 +158,45 @@ public final class TestScheduler extends Scheduler {
             return disposed;
         }
 
+        @NonNull
         @Override
-        public Disposable schedule(Runnable run, long delayTime, TimeUnit unit) {
+        public Disposable schedule(@NonNull Runnable run, long delayTime, @NonNull TimeUnit unit) {
             if (disposed) {
                 return EmptyDisposable.INSTANCE;
             }
             final TimedRunnable timedAction = new TimedRunnable(this, time + unit.toNanos(delayTime), run, counter++);
             queue.add(timedAction);
 
-            return Disposables.fromRunnable(new Runnable() {
-                @Override
-                public void run() {
-                    queue.remove(timedAction);
-                }
-            });
+            return Disposables.fromRunnable(new QueueRemove(timedAction));
         }
 
+        @NonNull
         @Override
-        public Disposable schedule(Runnable run) {
+        public Disposable schedule(@NonNull Runnable run) {
             if (disposed) {
                 return EmptyDisposable.INSTANCE;
             }
             final TimedRunnable timedAction = new TimedRunnable(this, 0, run, counter++);
             queue.add(timedAction);
-            return Disposables.fromRunnable(new Runnable() {
-                @Override
-                public void run() {
-                    queue.remove(timedAction);
-                }
-            });
+            return Disposables.fromRunnable(new QueueRemove(timedAction));
         }
 
         @Override
-        public long now(TimeUnit unit) {
+        public long now(@NonNull TimeUnit unit) {
             return TestScheduler.this.now(unit);
         }
 
+        final class QueueRemove implements Runnable {
+            final TimedRunnable timedAction;
+
+            QueueRemove(TimedRunnable timedAction) {
+                this.timedAction = timedAction;
+            }
+
+            @Override
+            public void run() {
+                queue.remove(timedAction);
+            }
+        }
     }
 }

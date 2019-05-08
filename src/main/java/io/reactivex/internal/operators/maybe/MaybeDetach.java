@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -35,58 +35,61 @@ public final class MaybeDetach<T> extends AbstractMaybeWithUpstream<T, T> {
 
     static final class DetachMaybeObserver<T> implements MaybeObserver<T>, Disposable {
 
-        MaybeObserver<? super T> actual;
+        MaybeObserver<? super T> downstream;
 
-        Disposable d;
+        Disposable upstream;
 
-        DetachMaybeObserver(MaybeObserver<? super T> actual) {
-            this.actual = actual;
+        DetachMaybeObserver(MaybeObserver<? super T> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void dispose() {
-            actual = null;
-            d.dispose();
-            d = DisposableHelper.DISPOSED;
+            downstream = null;
+            upstream.dispose();
+            upstream = DisposableHelper.DISPOSED;
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onSuccess(T value) {
-            d = DisposableHelper.DISPOSED;
-            MaybeObserver<? super T> a = actual;
+            upstream = DisposableHelper.DISPOSED;
+            MaybeObserver<? super T> a = downstream;
             if (a != null) {
+                downstream = null;
                 a.onSuccess(value);
             }
         }
 
         @Override
         public void onError(Throwable e) {
-            d = DisposableHelper.DISPOSED;
-            MaybeObserver<? super T> a = actual;
+            upstream = DisposableHelper.DISPOSED;
+            MaybeObserver<? super T> a = downstream;
             if (a != null) {
+                downstream = null;
                 a.onError(e);
             }
         }
 
         @Override
         public void onComplete() {
-            d = DisposableHelper.DISPOSED;
-            MaybeObserver<? super T> a = actual;
+            upstream = DisposableHelper.DISPOSED;
+            MaybeObserver<? super T> a = downstream;
             if (a != null) {
+                downstream = null;
                 a.onComplete();
             }
         }

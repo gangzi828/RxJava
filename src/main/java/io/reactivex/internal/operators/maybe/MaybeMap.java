@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -42,35 +42,35 @@ public final class MaybeMap<T, R> extends AbstractMaybeWithUpstream<T, R> {
 
     static final class MapMaybeObserver<T, R> implements MaybeObserver<T>, Disposable {
 
-        final MaybeObserver<? super R> actual;
+        final MaybeObserver<? super R> downstream;
 
         final Function<? super T, ? extends R> mapper;
 
-        Disposable d;
+        Disposable upstream;
 
         MapMaybeObserver(MaybeObserver<? super R> actual, Function<? super T, ? extends R> mapper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
         }
 
         @Override
         public void dispose() {
-            Disposable d = this.d;
-            this.d = DisposableHelper.DISPOSED;
+            Disposable d = this.upstream;
+            this.upstream = DisposableHelper.DISPOSED;
             d.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return d.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -82,24 +82,21 @@ public final class MaybeMap<T, R> extends AbstractMaybeWithUpstream<T, R> {
                 v = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null item");
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                actual.onError(ex);
+                downstream.onError(ex);
                 return;
             }
 
-            actual.onSuccess(v);
+            downstream.onSuccess(v);
         }
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
-
-
     }
-
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,10 +15,20 @@ package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
 
-import java.util.NoSuchElementException;
-import org.junit.Test;
+import java.util.*;
 
-import io.reactivex.Flowable;
+import org.junit.*;
+import org.reactivestreams.*;
+
+import io.reactivex.*;
+import io.reactivex.Observable;
+import io.reactivex.Observer;
+import io.reactivex.disposables.Disposables;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Function;
+import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.processors.PublishProcessor;
 
 public class FlowableElementAtTest {
 
@@ -174,5 +184,174 @@ public class FlowableElementAtTest {
             .elementAtOrError(1)
             .test()
             .assertFailure(NoSuchElementException.class);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Publisher<Object>>() {
+            @Override
+            public Publisher<Object> apply(Flowable<Object> f) throws Exception {
+                return f.elementAt(0).toFlowable();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeFlowableToMaybe(new Function<Flowable<Object>, Maybe<Object>>() {
+            @Override
+            public Maybe<Object> apply(Flowable<Object> f) throws Exception {
+                return f.elementAt(0);
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeFlowableToSingle(new Function<Flowable<Object>, Single<Object>>() {
+            @Override
+            public Single<Object> apply(Flowable<Object> f) throws Exception {
+                return f.elementAt(0, 1);
+            }
+        });
+    }
+
+    @Test
+    public void elementAtIndex1WithDefaultOnEmptySourceObservable() {
+        Flowable.empty()
+            .elementAt(1, 10)
+            .toFlowable()
+            .test()
+            .assertResult(10);
+    }
+
+    @Test
+    public void errorFlowable() {
+        Flowable.error(new TestException())
+            .elementAt(1, 10)
+            .toFlowable()
+            .test()
+            .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+            .elementAt(1, 10)
+            .test()
+            .assertFailure(TestException.class);
+
+        Flowable.error(new TestException())
+        .elementAt(1)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+
+                    subscriber.onNext(1);
+                    subscriber.onNext(2);
+                    subscriber.onError(new TestException());
+                    subscriber.onComplete();
+                }
+            }
+            .elementAt(0)
+            .toFlowable()
+            .test()
+            .assertResult(1);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.elementAt(0);
+            }
+        }, false, null, 1);
+
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.elementAt(0, 1);
+            }
+        }, false, null, 1, 1);
+
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.elementAt(0).toFlowable();
+            }
+        }, false, null, 1);
+
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return f.elementAt(0, 1).toFlowable();
+            }
+        }, false, null, 1, 1);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishProcessor.create().elementAt(0).toFlowable());
+        TestHelper.checkDisposed(PublishProcessor.create().elementAt(0, 1).toFlowable());
+
+        TestHelper.checkDisposed(PublishProcessor.create().elementAt(0));
+        TestHelper.checkDisposed(PublishProcessor.create().elementAt(0, 1));
+    }
+
+    @Test
+    public void badSourceObservable() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+
+                    observer.onNext(1);
+                    observer.onNext(2);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .elementAt(0)
+            .toFlowable()
+            .test()
+            .assertResult(1);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void badSource2() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+
+                    subscriber.onNext(1);
+                    subscriber.onNext(2);
+                    subscriber.onError(new TestException());
+                    subscriber.onComplete();
+                }
+            }
+            .elementAt(0, 1)
+            .test()
+            .assertResult(1);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

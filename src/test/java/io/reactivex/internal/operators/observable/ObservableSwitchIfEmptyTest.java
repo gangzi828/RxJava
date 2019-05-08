@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,7 +25,6 @@ import io.reactivex.disposables.*;
 import io.reactivex.functions.Consumer;
 import io.reactivex.observers.DefaultObserver;
 
-
 public class ObservableSwitchIfEmptyTest {
 
     @Test
@@ -35,7 +34,7 @@ public class ObservableSwitchIfEmptyTest {
                 .switchIfEmpty(Observable.just(2)
                 .doOnSubscribe(new Consumer<Disposable>() {
                     @Override
-                    public void accept(Disposable s) {
+                    public void accept(Disposable d) {
                         subscribed.set(true);
                     }
                 }));
@@ -89,7 +88,6 @@ public class ObservableSwitchIfEmptyTest {
                 };
             }
         }).subscribe();
-
 
         assertTrue(d.isDisposed());
         // FIXME no longer assertable

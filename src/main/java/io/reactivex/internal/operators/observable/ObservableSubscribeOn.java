@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,54 +28,49 @@ public final class ObservableSubscribeOn<T> extends AbstractObservableWithUpstre
     }
 
     @Override
-    public void subscribeActual(final Observer<? super T> s) {
-        final SubscribeOnObserver<T> parent = new SubscribeOnObserver<T>(s);
+    public void subscribeActual(final Observer<? super T> observer) {
+        final SubscribeOnObserver<T> parent = new SubscribeOnObserver<T>(observer);
 
-        s.onSubscribe(parent);
+        observer.onSubscribe(parent);
 
-        parent.setDisposable(scheduler.scheduleDirect(new Runnable() {
-            @Override
-            public void run() {
-                source.subscribe(parent);
-            }
-        }));
+        parent.setDisposable(scheduler.scheduleDirect(new SubscribeTask(parent)));
     }
 
     static final class SubscribeOnObserver<T> extends AtomicReference<Disposable> implements Observer<T>, Disposable {
 
         private static final long serialVersionUID = 8094547886072529208L;
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
 
-        final AtomicReference<Disposable> s;
+        final AtomicReference<Disposable> upstream;
 
-        SubscribeOnObserver(Observer<? super T> actual) {
-            this.actual = actual;
-            this.s = new AtomicReference<Disposable>();
+        SubscribeOnObserver(Observer<? super T> downstream) {
+            this.downstream = downstream;
+            this.upstream = new AtomicReference<Disposable>();
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            DisposableHelper.setOnce(this.s, s);
+        public void onSubscribe(Disposable d) {
+            DisposableHelper.setOnce(this.upstream, d);
         }
 
         @Override
         public void onNext(T t) {
-            actual.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void dispose() {
-            DisposableHelper.dispose(s);
+            DisposableHelper.dispose(upstream);
             DisposableHelper.dispose(this);
         }
 
@@ -86,6 +81,19 @@ public final class ObservableSubscribeOn<T> extends AbstractObservableWithUpstre
 
         void setDisposable(Disposable d) {
             DisposableHelper.setOnce(this, d);
+        }
+    }
+
+    final class SubscribeTask implements Runnable {
+        private final SubscribeOnObserver<T> parent;
+
+        SubscribeTask(SubscribeOnObserver<T> parent) {
+            this.parent = parent;
+        }
+
+        @Override
+        public void run() {
+            source.subscribe(parent);
         }
     }
 }

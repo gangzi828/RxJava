@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,15 +12,17 @@
  */
 package io.reactivex.internal.operators.flowable;
 
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
 import org.junit.*;
 import org.reactivestreams.Subscription;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
-import io.reactivex.functions.Consumer;
+import io.reactivex.functions.*;
 import io.reactivex.processors.PublishProcessor;
+import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableDelaySubscriptionOtherTest {
@@ -308,5 +310,41 @@ public class FlowableDelaySubscriptionOtherTest {
     @Test(expected = NullPointerException.class)
     public void otherNull() {
         Flowable.just(1).delaySubscription((Flowable<Integer>)null);
+    }
+
+    @Test
+    public void badSourceOther() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Integer>, Object>() {
+            @Override
+            public Object apply(Flowable<Integer> f) throws Exception {
+                return Flowable.just(1).delaySubscription(f);
+            }
+        }, false, 1, 1, 1);
+    }
+
+    @Test
+    public void afterDelayNoInterrupt() {
+        ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor();
+        try {
+            for (Scheduler s : new Scheduler[] { Schedulers.single(), Schedulers.computation(), Schedulers.newThread(), Schedulers.io(), Schedulers.from(exec) }) {
+                final TestSubscriber<Boolean> ts = TestSubscriber.create();
+                ts.withTag(s.getClass().getSimpleName());
+
+                Flowable.<Boolean>create(new FlowableOnSubscribe<Boolean>() {
+                    @Override
+                    public void subscribe(FlowableEmitter<Boolean> emitter) throws Exception {
+                      emitter.onNext(Thread.interrupted());
+                      emitter.onComplete();
+                    }
+                }, BackpressureStrategy.MISSING)
+                .delaySubscription(100, TimeUnit.MILLISECONDS, s)
+                .subscribe(ts);
+
+                ts.awaitTerminalEvent();
+                ts.assertValue(false);
+            }
+        } finally {
+            exec.shutdown();
+        }
     }
 }

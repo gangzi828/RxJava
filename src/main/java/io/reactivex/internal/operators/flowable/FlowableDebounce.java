@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,10 +17,12 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.exceptions.Exceptions;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.Function;
 import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -29,7 +31,7 @@ import io.reactivex.subscribers.*;
 public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T, T> {
     final Function<? super T, ? extends Publisher<U>> debounceSelector;
 
-    public FlowableDebounce(Publisher<T> source, Function<? super T, ? extends Publisher<U>> debounceSelector) {
+    public FlowableDebounce(Flowable<T> source, Function<? super T, ? extends Publisher<U>> debounceSelector) {
         super(source);
         this.debounceSelector = debounceSelector;
     }
@@ -40,13 +42,13 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
     }
 
     static final class DebounceSubscriber<T, U> extends AtomicLong
-    implements Subscriber<T>, Subscription {
+    implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = 6725975399620862591L;
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final Function<? super T, ? extends Publisher<U>> debounceSelector;
 
-        Subscription s;
+        Subscription upstream;
 
         final AtomicReference<Disposable> debouncer = new AtomicReference<Disposable>();
 
@@ -56,15 +58,15 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
 
         DebounceSubscriber(Subscriber<? super T> actual,
                 Function<? super T, ? extends Publisher<U>> debounceSelector) {
-            this.actual = actual;
+            this.downstream = actual;
             this.debounceSelector = debounceSelector;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -86,17 +88,11 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
             Publisher<U> p;
 
             try {
-                p = debounceSelector.apply(t);
+                p = ObjectHelper.requireNonNull(debounceSelector.apply(t), "The publisher supplied is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancel();
-                actual.onError(e);
-                return;
-            }
-
-            if (p == null) {
-                cancel();
-                actual.onError(new NullPointerException("The publisher supplied is null"));
+                downstream.onError(e);
                 return;
             }
 
@@ -110,7 +106,7 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
         @Override
         public void onError(Throwable t) {
             DisposableHelper.dispose(debouncer);
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -125,7 +121,7 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
                 DebounceInnerSubscriber<T, U> dis = (DebounceInnerSubscriber<T, U>)d;
                 dis.emit();
                 DisposableHelper.dispose(debouncer);
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
@@ -138,7 +134,7 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
             DisposableHelper.dispose(debouncer);
         }
 
@@ -146,13 +142,11 @@ public final class FlowableDebounce<T, U> extends AbstractFlowableWithUpstream<T
             if (idx == index) {
                 long r = get();
                 if (r != 0L) {
-                    actual.onNext(value);
-                    if (r != Long.MAX_VALUE) {
-                        decrementAndGet();
-                    }
+                    downstream.onNext(value);
+                    BackpressureHelper.produced(this, 1);
                 } else {
                     cancel();
-                    actual.onError(new IllegalStateException("Could not deliver value due to lack of requests"));
+                    downstream.onError(new MissingBackpressureException("Could not deliver value due to lack of requests"));
                 }
             }
         }

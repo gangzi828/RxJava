@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,29 +24,29 @@ import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.*;
 import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.fuseable.HasUpstreamObservableSource;
 import io.reactivex.internal.util.*;
 import io.reactivex.observables.ConnectableObservable;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Timed;
 
-public final class ObservableReplay<T> extends ConnectableObservable<T> implements HasUpstreamObservableSource<T> {
+public final class ObservableReplay<T> extends ConnectableObservable<T> implements HasUpstreamObservableSource<T>, ResettableConnectable {
     /** The source observable. */
     final ObservableSource<T> source;
     /** Holds the current subscriber that is, will be or just was subscribed to the source observable. */
     final AtomicReference<ReplayObserver<T>> current;
     /** A factory that creates the appropriate buffer for the ReplayObserver. */
-    final Callable<? extends ReplayBuffer<T>> bufferFactory;
+    final BufferSupplier<T> bufferFactory;
 
     final ObservableSource<T> onSubscribe;
 
+    interface BufferSupplier<T> {
+        ReplayBuffer<T> call();
+    }
+
     @SuppressWarnings("rawtypes")
-    static final Callable DEFAULT_UNBOUNDED_FACTORY = new Callable() {
-        @Override
-        public Object call() {
-            return new UnboundedReplayBuffer<Object>(16);
-        }
-    };
+    static final BufferSupplier DEFAULT_UNBOUNDED_FACTORY = new UnBoundedFactory();
 
     /**
      * Given a connectable observable factory, it multicasts over the generated
@@ -60,32 +60,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
     public static <U, R> Observable<R> multicastSelector(
             final Callable<? extends ConnectableObservable<U>> connectableFactory,
             final Function<? super Observable<U>, ? extends ObservableSource<R>> selector) {
-        return RxJavaPlugins.onAssembly(new Observable<R>() {
-            @Override
-            protected void subscribeActual(Observer<? super R> child) {
-                ConnectableObservable<U> co;
-                ObservableSource<R> observable;
-                try {
-                    co = connectableFactory.call();
-                    observable = selector.apply(co);
-                } catch (Throwable e) {
-                    Exceptions.throwIfFatal(e);
-                    EmptyDisposable.error(e, child);
-                    return;
-                }
-
-                final ObserverResourceWrapper<R> srw = new ObserverResourceWrapper<R>(child);
-
-                observable.subscribe(srw);
-
-                co.connect(new Consumer<Disposable>() {
-                    @Override
-                    public void accept(Disposable r) {
-                        srw.setResource(r);
-                    }
-                });
-            }
-        });
+        return RxJavaPlugins.onAssembly(new MulticastReplay<R, U>(connectableFactory, selector));
     }
 
     /**
@@ -98,17 +73,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
      */
     public static <T> ConnectableObservable<T> observeOn(final ConnectableObservable<T> co, final Scheduler scheduler) {
         final Observable<T> observable = co.observeOn(scheduler);
-        return RxJavaPlugins.onAssembly(new ConnectableObservable<T>() {
-            @Override
-            public void connect(Consumer<? super Disposable> connection) {
-                co.connect(connection);
-            }
-
-            @Override
-            protected void subscribeActual(Observer<? super T> observer) {
-                observable.subscribe(observer);
-            }
-        });
+        return RxJavaPlugins.onAssembly(new Replay<T>(co, observable));
     }
 
     /**
@@ -134,12 +99,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
         if (bufferSize == Integer.MAX_VALUE) {
             return createFrom(source);
         }
-        return create(source, new Callable<ReplayBuffer<T>>() {
-            @Override
-            public ReplayBuffer<T> call() {
-                return new SizeBoundReplayBuffer<T>(bufferSize);
-            }
-        });
+        return create(source, new ReplayBufferSupplier<T>(bufferSize));
     }
 
     /**
@@ -168,12 +128,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
      */
     public static <T> ConnectableObservable<T> create(ObservableSource<T> source,
             final long maxAge, final TimeUnit unit, final Scheduler scheduler, final int bufferSize) {
-        return create(source, new Callable<ReplayBuffer<T>>() {
-            @Override
-            public ReplayBuffer<T> call() {
-                return new SizeAndTimeBoundReplayBuffer<T>(bufferSize, maxAge, unit, scheduler);
-            }
-        });
+        return create(source, new ScheduledReplaySupplier<T>(bufferSize, maxAge, unit, scheduler));
     }
 
     /**
@@ -183,65 +138,16 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
      * @return the connectable observable
      */
     static <T> ConnectableObservable<T> create(ObservableSource<T> source,
-            final Callable<? extends ReplayBuffer<T>> bufferFactory) {
+            final BufferSupplier<T> bufferFactory) {
         // the current connection to source needs to be shared between the operator and its onSubscribe call
         final AtomicReference<ReplayObserver<T>> curr = new AtomicReference<ReplayObserver<T>>();
-        ObservableSource<T> onSubscribe = new ObservableSource<T>() {
-            @Override
-            public void subscribe(Observer<? super T> child) {
-                // concurrent connection/disconnection may change the state,
-                // we loop to be atomic while the child subscribes
-                for (;;) {
-                    // get the current subscriber-to-source
-                    ReplayObserver<T> r = curr.get();
-                    // if there isn't one
-                    if (r == null) {
-                        // create a new subscriber to source
-                        ReplayBuffer<T> buf;
-
-                        try {
-                            buf = bufferFactory.call();
-                        } catch (Throwable ex) {
-                            Exceptions.throwIfFatal(ex);
-                            throw ExceptionHelper.wrapOrThrow(ex);
-                        }
-
-                        ReplayObserver<T> u = new ReplayObserver<T>(buf);
-                        // let's try setting it as the current subscriber-to-source
-                        if (!curr.compareAndSet(null, u)) {
-                            // didn't work, maybe someone else did it or the current subscriber
-                            // to source has just finished
-                            continue;
-                        }
-                        // we won, let's use it going onwards
-                        r = u;
-                    }
-
-                    // create the backpressure-managing producer for this child
-                    InnerDisposable<T> inner = new InnerDisposable<T>(r, child);
-                    // we try to add it to the array of observers
-                    // if it fails, no worries because we will still have its buffer
-                    // so it is going to replay it for us
-                    r.add(inner);
-                    // the producer has been registered with the current subscriber-to-source so
-                    // at least it will receive the next terminal event
-                    // setting the producer will trigger the first request to be considered by
-                    // the subscriber-to-source.
-                    child.onSubscribe(inner);
-
-                    // replay the contents of the buffer
-                    r.buffer.replay(inner);
-
-                    break; // NOPMD
-                }
-            }
-        };
+        ObservableSource<T> onSubscribe = new ReplaySource<T>(curr, bufferFactory);
         return RxJavaPlugins.onAssembly(new ObservableReplay<T>(onSubscribe, source, curr, bufferFactory));
     }
 
     private ObservableReplay(ObservableSource<T> onSubscribe, ObservableSource<T> source,
                              final AtomicReference<ReplayObserver<T>> current,
-                             final Callable<? extends ReplayBuffer<T>> bufferFactory) {
+                             final BufferSupplier<T> bufferFactory) {
         this.onSubscribe = onSubscribe;
         this.source = source;
         this.current = current;
@@ -251,6 +157,12 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
     @Override
     public ObservableSource<T> source() {
         return source;
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    @Override
+    public void resetIf(Disposable connectionObject) {
+        current.compareAndSet((ReplayObserver)connectionObject, null);
     }
 
     @Override
@@ -269,14 +181,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
             // if there is none yet or the current has been disposed
             if (ps == null || ps.isDisposed()) {
                 // create a new subscriber-to-source
-                ReplayBuffer<T> buf;
-
-                try {
-                    buf = bufferFactory.call();
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    throw ExceptionHelper.wrapOrThrow(ex);
-                }
+                ReplayBuffer<T> buf = bufferFactory.call();
 
                 ReplayObserver<T> u = new ReplayObserver<T>(buf);
                 // try setting it as the current subscriber-to-source
@@ -309,6 +214,9 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
         try {
             connection.accept(ps);
         } catch (Throwable ex) {
+            if (doConnect) {
+                ps.shouldConnect.compareAndSet(true, false);
+            }
             Exceptions.throwIfFatal(ex);
             throw ExceptionHelper.wrapOrThrow(ex);
         }
@@ -318,7 +226,10 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
     }
 
     @SuppressWarnings("rawtypes")
-    static final class ReplayObserver<T> implements Observer<T>, Disposable {
+    static final class ReplayObserver<T>
+    extends AtomicReference<Disposable>
+    implements Observer<T>, Disposable {
+        private static final long serialVersionUID = -533785617179540163L;
         /** Holds notifications from upstream. */
         final ReplayBuffer<T> buffer;
         /** Indicates this Observer received a terminal event. */
@@ -336,9 +247,6 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
          * connection is only performed by one thread.
          */
         final AtomicBoolean shouldConnect;
-
-        /** The upstream producer. */
-        volatile Disposable subscription;
 
         ReplayObserver(ReplayBuffer<T> buffer) {
             this.buffer = buffer;
@@ -360,7 +268,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
             // current.compareAndSet(ReplayObserver.this, null);
             // we don't care if it fails because it means the current has
             // been replaced in the meantime
-            subscription.dispose();
+            DisposableHelper.dispose(this);
         }
 
         /**
@@ -370,9 +278,6 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
          * @return true if succeeded, false otherwise
          */
         boolean add(InnerDisposable<T> producer) {
-            if (producer == null) {
-                throw new NullPointerException();
-            }
             // the state can change so we do a CAS loop to achieve atomicity
             for (;;) {
                 // get the current producer array
@@ -405,14 +310,15 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
             for (;;) {
                 // let's read the current observers array
                 InnerDisposable[] c = observers.get();
+
+                int len = c.length;
                 // if it is either empty or terminated, there is nothing to remove so we quit
-                if (c == EMPTY || c == TERMINATED) {
+                if (len == 0) {
                     return;
                 }
                 // let's find the supplied producer in the array
                 // although this is O(n), we don't expect too many child observers in general
                 int j = -1;
-                int len = c.length;
                 for (int i = 0; i < len; i++) {
                     if (c[i].equals(producer)) {
                         j = i;
@@ -448,8 +354,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
 
         @Override
         public void onSubscribe(Disposable p) {
-            if (DisposableHelper.validate(this.subscription, p)) {
-                subscription = p;
+            if (DisposableHelper.setOnce(this, p)) {
                 replay();
             }
         }
@@ -461,32 +366,28 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
                 replay();
             }
         }
+
         @Override
         public void onError(Throwable e) {
             // The observer front is accessed serially as required by spec so
             // no need to CAS in the terminal value
             if (!done) {
                 done = true;
-                try {
-                    buffer.error(e);
-                    replay();
-                } finally {
-                    dispose(); // expectation of testIssue2191
-                }
+                buffer.error(e);
+                replayFinal();
+            } else {
+                RxJavaPlugins.onError(e);
             }
         }
+
         @Override
         public void onComplete() {
             // The observer front is accessed serially as required by spec so
             // no need to CAS in the terminal value
             if (!done) {
                 done = true;
-                try {
-                    buffer.complete();
-                    replay();
-                } finally {
-                    dispose();
-                }
+                buffer.complete();
+                replayFinal();
             }
         }
 
@@ -500,13 +401,27 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
                 buffer.replay(rp);
             }
         }
+
+        /**
+         * Tries to replay the buffer contents to all known observers.
+         */
+        void replayFinal() {
+            @SuppressWarnings("unchecked")
+            InnerDisposable<T>[] a = observers.getAndSet(TERMINATED);
+            for (InnerDisposable<T> rp : a) {
+                buffer.replay(rp);
+            }
+        }
     }
     /**
      * A Disposable that manages the disposed state of a
      * child Observer in thread-safe manner.
      * @param <T> the value type
      */
-    static final class InnerDisposable<T> implements Disposable {
+    static final class InnerDisposable<T>
+    extends AtomicInteger
+    implements Disposable {
+        private static final long serialVersionUID = 2728361546769921047L;
         /**
          * The parent subscriber-to-source used to allow removing the child in case of
          * child dispose() call.
@@ -519,10 +434,6 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
          * Guarded by the emitter loop.
          */
         Object index;
-        /** Indicates an emission state. Guarded by this. */
-        boolean emitting;
-        /** Indicates a missed update. Guarded by this. */
-        boolean missed;
 
         volatile boolean cancelled;
 
@@ -542,6 +453,8 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
                 cancelled = true;
                 // remove this from the parent
                 parent.remove(this);
+                // make sure the last known node is not retained
+                index = null;
             }
         }
         /**
@@ -597,6 +510,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
         UnboundedReplayBuffer(int capacityHint) {
             super(capacityHint);
         }
+
         @Override
         public void next(T value) {
             add(NotificationLite.next(value));
@@ -617,14 +531,13 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
 
         @Override
         public void replay(InnerDisposable<T> output) {
-            synchronized (output) {
-                if (output.emitting) {
-                    output.missed = true;
-                    return;
-                }
-                output.emitting = true;
+            if (output.getAndIncrement() != 0) {
+                return;
             }
+
             final Observer<? super T> child = output.child;
+
+            int missed = 1;
 
             for (;;) {
                 if (output.isDisposed()) {
@@ -637,16 +550,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
 
                 while (destinationIndex < sourceIndex) {
                     Object o = get(destinationIndex);
-                    try {
-                        if (NotificationLite.accept(o, child)) {
-                            return;
-                        }
-                    } catch (Throwable err) {
-                        Exceptions.throwIfFatal(err);
-                        output.dispose();
-                        if (!NotificationLite.isError(o) && !NotificationLite.isComplete(o)) {
-                            child.onError(err);
-                        }
+                    if (NotificationLite.accept(o, child)) {
                         return;
                     }
                     if (output.isDisposed()) {
@@ -656,13 +560,9 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
                 }
 
                 output.index = destinationIndex;
-
-                synchronized (output) {
-                    if (!output.missed) {
-                        output.emitting = false;
-                        return;
-                    }
-                    output.missed = false;
+                missed = output.addAndGet(-missed);
+                if (missed == 0) {
+                    break;
                 }
             }
         }
@@ -686,7 +586,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
      *
      * @param <T> the value type
      */
-    static class BoundedReplayBuffer<T> extends AtomicReference<Node> implements ReplayBuffer<T> {
+    abstract static class BoundedReplayBuffer<T> extends AtomicReference<Node> implements ReplayBuffer<T> {
 
         private static final long serialVersionUID = 2346567790059478686L;
 
@@ -714,14 +614,21 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
         final void removeFirst() {
             Node head = get();
             Node next = head.get();
-            if (next == null) {
-                throw new IllegalStateException("Empty list!");
-            }
             size--;
             // can't just move the head because it would retain the very first value
             // can't null out the head's value because of late replayers would see null
             setFirst(next);
         }
+
+        final void trimHead() {
+            Node head = get();
+            if (head.value != null) {
+                Node n = new Node(null);
+                n.lazySet(head.get());
+                set(n);
+            }
+        }
+
         /* test */ final void removeSome(int n) {
             Node head = get();
             while (n > 0) {
@@ -766,59 +673,43 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
 
         @Override
         public final void replay(InnerDisposable<T> output) {
-            synchronized (output) {
-                if (output.emitting) {
-                    output.missed = true;
-                    return;
-                }
-                output.emitting = true;
+            if (output.getAndIncrement() != 0) {
+                return;
             }
-            for (;;) {
-                if (output.isDisposed()) {
-                    return;
-                }
 
+            int missed = 1;
+
+            for (;;) {
                 Node node = output.index();
                 if (node == null) {
-                    node = get();
+                    node = getHead();
                     output.index = node;
                 }
 
                 for (;;) {
+                    if (output.isDisposed()) {
+                        output.index = null;
+                        return;
+                    }
+
                     Node v = node.get();
                     if (v != null) {
                         Object o = leaveTransform(v.value);
-                        try {
-                            if (NotificationLite.accept(o, output.child)) {
-                                output.index = null;
-                                return;
-                            }
-                        } catch (Throwable err) {
-                            Exceptions.throwIfFatal(err);
+                        if (NotificationLite.accept(o, output.child)) {
                             output.index = null;
-                            output.dispose();
-                            if (!NotificationLite.isError(o) && !NotificationLite.isComplete(o)) {
-                                output.child.onError(err);
-                            }
                             return;
                         }
                         node = v;
                     } else {
                         break;
                     }
-                    if (output.isDisposed()) {
-                        return;
-                    }
                 }
 
                 output.index = node;
 
-                synchronized (output) {
-                    if (!output.missed) {
-                        output.emitting = false;
-                        return;
-                    }
-                    output.missed = false;
+                missed = output.addAndGet(-missed);
+                if (missed == 0) {
+                    break;
                 }
             }
 
@@ -846,18 +737,17 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
          * Override this method to truncate a non-terminated buffer
          * based on its current properties.
          */
-        void truncate() {
+        abstract void truncate();
 
-        }
         /**
          * Override this method to truncate a terminated buffer
          * based on its properties (i.e., truncate but the very last node).
          */
         void truncateFinal() {
-
+            trimHead();
         }
         /* test */ final  void collect(Collection<? super T> output) {
-            Node n = get();
+            Node n = getHead();
             for (;;) {
                 Node next = n.get();
                 if (next != null) {
@@ -878,6 +768,10 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
         }
         /* test */ boolean hasCompleted() {
             return tail.value != null && NotificationLite.isComplete(leaveTransform(tail.value));
+        }
+
+        Node getHead() {
+            return get();
         }
     }
 
@@ -969,6 +863,7 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
                 setFirst(prev);
             }
         }
+
         @Override
         void truncateFinal() {
             long timeLimit = scheduler.now(unit) - maxAge;
@@ -995,6 +890,188 @@ public final class ObservableReplay<T> extends ConnectableObservable<T> implemen
             if (e != 0) {
                 setFirst(prev);
             }
+        }
+
+        @Override
+        Node getHead() {
+            long timeLimit = scheduler.now(unit) - maxAge;
+            Node prev = get();
+            Node next = prev.get();
+            for (;;) {
+                if (next == null) {
+                    break;
+                }
+                Timed<?> v = (Timed<?>)next.value;
+                if (NotificationLite.isComplete(v.value()) || NotificationLite.isError(v.value())) {
+                    break;
+                }
+                if (v.time() <= timeLimit) {
+                    prev = next;
+                    next = next.get();
+                } else {
+                    break;
+                }
+            }
+            return prev;
+        }
+    }
+
+    static final class UnBoundedFactory implements BufferSupplier<Object> {
+        @Override
+        public ReplayBuffer<Object> call() {
+            return new UnboundedReplayBuffer<Object>(16);
+        }
+    }
+
+    static final class DisposeConsumer<R> implements Consumer<Disposable> {
+        private final ObserverResourceWrapper<R> srw;
+
+        DisposeConsumer(ObserverResourceWrapper<R> srw) {
+            this.srw = srw;
+        }
+
+        @Override
+        public void accept(Disposable r) {
+            srw.setResource(r);
+        }
+    }
+
+    static final class ReplayBufferSupplier<T> implements BufferSupplier<T> {
+        private final int bufferSize;
+
+        ReplayBufferSupplier(int bufferSize) {
+            this.bufferSize = bufferSize;
+        }
+
+        @Override
+        public ReplayBuffer<T> call() {
+            return new SizeBoundReplayBuffer<T>(bufferSize);
+        }
+    }
+
+    static final class ScheduledReplaySupplier<T> implements BufferSupplier<T> {
+        private final int bufferSize;
+        private final long maxAge;
+        private final TimeUnit unit;
+        private final Scheduler scheduler;
+
+        ScheduledReplaySupplier(int bufferSize, long maxAge, TimeUnit unit, Scheduler scheduler) {
+            this.bufferSize = bufferSize;
+            this.maxAge = maxAge;
+            this.unit = unit;
+            this.scheduler = scheduler;
+        }
+
+        @Override
+        public ReplayBuffer<T> call() {
+            return new SizeAndTimeBoundReplayBuffer<T>(bufferSize, maxAge, unit, scheduler);
+        }
+    }
+
+    static final class ReplaySource<T> implements ObservableSource<T> {
+        private final AtomicReference<ReplayObserver<T>> curr;
+        private final BufferSupplier<T> bufferFactory;
+
+        ReplaySource(AtomicReference<ReplayObserver<T>> curr, BufferSupplier<T> bufferFactory) {
+            this.curr = curr;
+            this.bufferFactory = bufferFactory;
+        }
+
+        @Override
+        public void subscribe(Observer<? super T> child) {
+            // concurrent connection/disconnection may change the state,
+            // we loop to be atomic while the child subscribes
+            for (;;) {
+                // get the current subscriber-to-source
+                ReplayObserver<T> r = curr.get();
+                // if there isn't one
+                if (r == null) {
+                    // create a new subscriber to source
+                    ReplayBuffer<T> buf = bufferFactory.call();
+
+                    ReplayObserver<T> u = new ReplayObserver<T>(buf);
+                    // let's try setting it as the current subscriber-to-source
+                    if (!curr.compareAndSet(null, u)) {
+                        // didn't work, maybe someone else did it or the current subscriber
+                        // to source has just finished
+                        continue;
+                    }
+                    // we won, let's use it going onwards
+                    r = u;
+                }
+
+                // create the backpressure-managing producer for this child
+                InnerDisposable<T> inner = new InnerDisposable<T>(r, child);
+                // the producer has been registered with the current subscriber-to-source so
+                // at least it will receive the next terminal event
+                // setting the producer will trigger the first request to be considered by
+                // the subscriber-to-source.
+                child.onSubscribe(inner);
+                // we try to add it to the array of observers
+                // if it fails, no worries because we will still have its buffer
+                // so it is going to replay it for us
+                r.add(inner);
+
+                if (inner.isDisposed()) {
+                    r.remove(inner);
+                    return;
+                }
+
+                // replay the contents of the buffer
+                r.buffer.replay(inner);
+
+                break; // NOPMD
+            }
+        }
+    }
+
+    static final class MulticastReplay<R, U> extends Observable<R> {
+        private final Callable<? extends ConnectableObservable<U>> connectableFactory;
+        private final Function<? super Observable<U>, ? extends ObservableSource<R>> selector;
+
+        MulticastReplay(Callable<? extends ConnectableObservable<U>> connectableFactory, Function<? super Observable<U>, ? extends ObservableSource<R>> selector) {
+            this.connectableFactory = connectableFactory;
+            this.selector = selector;
+        }
+
+        @Override
+        protected void subscribeActual(Observer<? super R> child) {
+            ConnectableObservable<U> co;
+            ObservableSource<R> observable;
+            try {
+                co = ObjectHelper.requireNonNull(connectableFactory.call(), "The connectableFactory returned a null ConnectableObservable");
+                observable = ObjectHelper.requireNonNull(selector.apply(co), "The selector returned a null ObservableSource");
+            } catch (Throwable e) {
+                Exceptions.throwIfFatal(e);
+                EmptyDisposable.error(e, child);
+                return;
+            }
+
+            final ObserverResourceWrapper<R> srw = new ObserverResourceWrapper<R>(child);
+
+            observable.subscribe(srw);
+
+            co.connect(new DisposeConsumer<R>(srw));
+        }
+    }
+
+    static final class Replay<T> extends ConnectableObservable<T> {
+        private final ConnectableObservable<T> co;
+        private final Observable<T> observable;
+
+        Replay(ConnectableObservable<T> co, Observable<T> observable) {
+            this.co = co;
+            this.observable = observable;
+        }
+
+        @Override
+        public void connect(Consumer<? super Disposable> connection) {
+            co.connect(connection);
+        }
+
+        @Override
+        protected void subscribeActual(Observer<? super T> observer) {
+            observable.subscribe(observer);
         }
     }
 }

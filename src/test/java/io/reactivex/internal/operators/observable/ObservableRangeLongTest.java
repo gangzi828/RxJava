@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,26 +13,19 @@
 
 package io.reactivex.internal.operators.observable;
 
-import io.reactivex.Flowable;
-import io.reactivex.Observable;
-import io.reactivex.Observer;
-import io.reactivex.TestHelper;
-import io.reactivex.functions.Consumer;
-import io.reactivex.observers.DefaultObserver;
-import io.reactivex.observers.TestObserver;
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
 import java.util.ArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.*;
+
 import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import io.reactivex.*;
+import io.reactivex.functions.Consumer;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.observers.*;
 
 public class ObservableRangeLongTest {
     @Test
@@ -106,12 +99,12 @@ public class ObservableRangeLongTest {
 
         Observable<Long> o = Observable.rangeLong(1, list.size());
 
-        TestObserver<Long> ts = new TestObserver<Long>();
+        TestObserver<Long> to = new TestObserver<Long>();
 
-        o.subscribe(ts);
+        o.subscribe(to);
 
-        ts.assertValueSequence(list);
-        ts.assertTerminated();
+        to.assertValueSequence(list);
+        to.assertTerminated();
     }
 
     @Test
@@ -143,12 +136,12 @@ public class ObservableRangeLongTest {
 
     @Test(timeout = 1000)
     public void testNearMaxValueWithoutBackpressure() {
-        TestObserver<Long> ts = new TestObserver<Long>();
-        Observable.rangeLong(Long.MAX_VALUE - 1L, 2L).subscribe(ts);
+        TestObserver<Long> to = new TestObserver<Long>();
+        Observable.rangeLong(Long.MAX_VALUE - 1L, 2L).subscribe(to);
 
-        ts.assertComplete();
-        ts.assertNoErrors();
-        ts.assertValues(Long.MAX_VALUE - 1, Long.MAX_VALUE);
+        to.assertComplete();
+        to.assertNoErrors();
+        to.assertValues(Long.MAX_VALUE - 1, Long.MAX_VALUE);
     }
 
     @Test
@@ -166,5 +159,42 @@ public class ObservableRangeLongTest {
         Observable.rangeLong(5495454L, 1L)
             .test()
             .assertResult(5495454L);
+    }
+
+    @Test
+    public void noOverflow() {
+        Observable.rangeLong(Long.MAX_VALUE - 1, 2);
+        Observable.rangeLong(Long.MIN_VALUE, 2);
+        Observable.rangeLong(Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    @Test
+    public void fused() {
+        TestObserver<Long> to = ObserverFusion.newTest(QueueFuseable.ANY);
+
+        Observable.rangeLong(1, 2).subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.SYNC)
+        .assertResult(1L, 2L);
+    }
+
+    @Test
+    public void fusedReject() {
+        TestObserver<Long> to = ObserverFusion.newTest(QueueFuseable.ASYNC);
+
+        Observable.rangeLong(1, 2).subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.NONE)
+        .assertResult(1L, 2L);
+    }
+
+    @Test
+    public void disposed() {
+        TestHelper.checkDisposed(Observable.rangeLong(1, 2));
+    }
+
+    @Test
+    public void fusedClearIsEmpty() {
+        TestHelper.checkFusedIsEmptyClear(Observable.rangeLong(1, 2));
     }
 }

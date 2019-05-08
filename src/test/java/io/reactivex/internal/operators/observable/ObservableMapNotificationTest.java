@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,14 +17,18 @@ import java.util.concurrent.Callable;
 
 import org.junit.Test;
 
-import io.reactivex.Observable;
+import io.reactivex.*;
+import io.reactivex.disposables.Disposables;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.operators.observable.ObservableMapNotification.MapNotificationObserver;
 import io.reactivex.observers.TestObserver;
 
 public class ObservableMapNotificationTest {
     @Test
     public void testJust() {
-        TestObserver<Object> ts = new TestObserver<Object>();
+        TestObserver<Object> to = new TestObserver<Object>();
         Observable.just(1)
         .flatMap(
                 new Function<Integer, Observable<Object>>() {
@@ -45,10 +49,59 @@ public class ObservableMapNotificationTest {
                         return Observable.never();
                     }
                 }
-        ).subscribe(ts);
+        ).subscribe(to);
 
-        ts.assertNoErrors();
-        ts.assertNotComplete();
-        ts.assertValue(2);
+        to.assertNoErrors();
+        to.assertNotComplete();
+        to.assertValue(2);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(new Observable<Integer>() {
+            @SuppressWarnings({ "rawtypes", "unchecked" })
+            @Override
+            protected void subscribeActual(Observer<? super Integer> observer) {
+                MapNotificationObserver mn = new MapNotificationObserver(
+                        observer,
+                        Functions.justFunction(Observable.just(1)),
+                        Functions.justFunction(Observable.just(2)),
+                        Functions.justCallable(Observable.just(3))
+                );
+                mn.onSubscribe(Disposables.empty());
+            }
+        });
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Integer>>() {
+            @Override
+            public ObservableSource<Integer> apply(Observable<Object> o) throws Exception {
+                return o.flatMap(
+                        Functions.justFunction(Observable.just(1)),
+                        Functions.justFunction(Observable.just(2)),
+                        Functions.justCallable(Observable.just(3))
+                );
+            }
+        });
+    }
+
+    @Test
+    public void onErrorCrash() {
+        TestObserver<Integer> to = Observable.<Integer>error(new TestException("Outer"))
+        .flatMap(Functions.justFunction(Observable.just(1)),
+                new Function<Throwable, Observable<Integer>>() {
+                    @Override
+                    public Observable<Integer> apply(Throwable t) throws Exception {
+                        throw new TestException("Inner");
+                    }
+                },
+                Functions.justCallable(Observable.just(3)))
+        .test()
+        .assertFailure(CompositeException.class);
+
+        TestHelper.assertError(to, 0, TestException.class, "Outer");
+        TestHelper.assertError(to, 1, TestException.class, "Inner");
     }
 }

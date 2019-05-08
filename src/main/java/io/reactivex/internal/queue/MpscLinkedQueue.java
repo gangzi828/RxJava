@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,13 +20,14 @@ package io.reactivex.internal.queue;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-import io.reactivex.internal.fuseable.SimpleQueue;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.internal.fuseable.SimplePlainQueue;
 
 /**
  * A multi-producer single consumer unbounded queue.
  * @param <T> the contained value type
  */
-public final class MpscLinkedQueue<T> implements SimpleQueue<T> {
+public final class MpscLinkedQueue<T> implements SimplePlainQueue<T> {
     private final AtomicReference<LinkedQueueNode<T>> producerNode;
     private final AtomicReference<LinkedQueueNode<T>> consumerNode;
 
@@ -35,7 +36,7 @@ public final class MpscLinkedQueue<T> implements SimpleQueue<T> {
         consumerNode = new AtomicReference<LinkedQueueNode<T>>();
         LinkedQueueNode<T> node = new LinkedQueueNode<T>();
         spConsumerNode(node);
-        xchgProducerNode(node);// this ensures correct construction: StoreLoad
+        xchgProducerNode(node); // this ensures correct construction: StoreLoad
     }
 
     /**
@@ -81,6 +82,7 @@ public final class MpscLinkedQueue<T> implements SimpleQueue<T> {
      *
      * @see java.util.Queue#poll()
      */
+    @Nullable
     @Override
     public T poll() {
         LinkedQueueNode<T> currConsumerNode = lpConsumerNode(); // don't load twice, it's alright
@@ -106,7 +108,9 @@ public final class MpscLinkedQueue<T> implements SimpleQueue<T> {
 
     @Override
     public boolean offer(T v1, T v2) {
-        return offer(v1) && offer(v2);
+        offer(v1);
+        offer(v2);
+        return true;
     }
 
     @Override

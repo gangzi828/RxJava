@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.Subscription;
 
+import io.reactivex.exceptions.ProtocolViolationException;
 import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -67,7 +68,7 @@ public enum SubscriptionHelper implements Subscription {
      * which is an indication of a onSubscribe management bug.
      */
     public static void reportSubscriptionSet() {
-        RxJavaPlugins.onError(new IllegalStateException("Subscription already set!"));
+        RxJavaPlugins.onError(new ProtocolViolationException("Subscription already set!"));
     }
 
     /**
@@ -89,15 +90,7 @@ public enum SubscriptionHelper implements Subscription {
      * @param n the overproduction amount
      */
     public static void reportMoreProduced(long n) {
-        RxJavaPlugins.onError(new IllegalStateException("More produced than requested: " + n));
-    }
-    /**
-     * Check if the given subscription is the common cancelled subscription.
-     * @param s the subscription to check
-     * @return true if the subscription is the common cancelled subscription
-     */
-    public static boolean isCancelled(Subscription s) {
-        return s == CANCELLED;
+        RxJavaPlugins.onError(new ProtocolViolationException("More produced than requested: " + n));
     }
 
     /**
@@ -136,7 +129,7 @@ public enum SubscriptionHelper implements Subscription {
      * @return true if the operation succeeded, false if the target field was not null.
      */
     public static boolean setOnce(AtomicReference<Subscription> field, Subscription s) {
-        ObjectHelper.requireNonNull(s, "d is null");
+        ObjectHelper.requireNonNull(s, "s is null");
         if (!field.compareAndSet(null, s)) {
             s.cancel();
             if (field.get() != CANCELLED) {
@@ -237,5 +230,25 @@ public enum SubscriptionHelper implements Subscription {
                 }
             }
         }
+    }
+
+    /**
+     * Atomically sets the subscription on the field if it is still null and issues a positive request
+     * to the given {@link Subscription}.
+     * <p>
+     * If the field is not null and doesn't contain the {@link #CANCELLED}
+     * instance, the {@link #reportSubscriptionSet()} is called.
+     * @param field the target field
+     * @param s the new subscription to set
+     * @param request the amount to request, positive (not verified)
+     * @return true if the operation succeeded, false if the target field was not null.
+     * @since 2.1.11
+     */
+    public static boolean setOnce(AtomicReference<Subscription> field, Subscription s, long request) {
+        if (setOnce(field, s)) {
+            s.request(request);
+            return true;
+        }
+        return false;
     }
 }

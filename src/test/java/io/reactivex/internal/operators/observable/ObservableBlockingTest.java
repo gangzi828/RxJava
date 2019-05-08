@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,18 +13,22 @@
 
 package io.reactivex.internal.operators.observable;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
 import io.reactivex.Observable;
 import io.reactivex.Observer;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.TestHelper;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.observers.BlockingFirstObserver;
+import io.reactivex.observers.TestObserver;
 import io.reactivex.schedulers.Schedulers;
 
 public class ObservableBlockingTest {
@@ -218,5 +222,100 @@ public class ObservableBlockingTest {
     @Test(expected = NoSuchElementException.class)
     public void blockingSingleEmpty() {
         Observable.empty().blockingSingle();
+    }
+
+    @Test
+    public void utilityClass() {
+        TestHelper.checkUtilityClass(ObservableBlockingSubscribe.class);
+    }
+
+    @Test
+    public void disposeUpFront() {
+        TestObserver<Object> to = new TestObserver<Object>();
+        to.dispose();
+        Observable.just(1).blockingSubscribe(to);
+
+        to.assertEmpty();
+    }
+
+    @SuppressWarnings("rawtypes")
+    @Test
+    public void delayed() throws Exception {
+        final TestObserver<Object> to = new TestObserver<Object>();
+        final Observer[] s = { null };
+
+        Schedulers.single().scheduleDirect(new Runnable() {
+            @SuppressWarnings("unchecked")
+            @Override
+            public void run() {
+                to.dispose();
+                s[0].onNext(1);
+            }
+        }, 200, TimeUnit.MILLISECONDS);
+
+        new Observable<Integer>() {
+            @Override
+            protected void subscribeActual(Observer<? super Integer> observer) {
+                observer.onSubscribe(Disposables.empty());
+                s[0] = observer;
+            }
+        }.blockingSubscribe(to);
+
+        while (!to.isDisposed()) {
+            Thread.sleep(100);
+        }
+
+        to.assertEmpty();
+    }
+
+    @Test
+    public void interrupt() {
+        TestObserver<Object> to = new TestObserver<Object>();
+        Thread.currentThread().interrupt();
+        Observable.never().blockingSubscribe(to);
+    }
+
+    @Test
+    public void onCompleteDelayed() {
+        TestObserver<Object> to = new TestObserver<Object>();
+
+        Observable.empty().delay(100, TimeUnit.MILLISECONDS)
+        .blockingSubscribe(to);
+
+        to.assertResult();
+    }
+
+    @Test
+    public void blockingCancelUpfront() {
+        BlockingFirstObserver<Integer> o = new BlockingFirstObserver<Integer>();
+
+        assertFalse(o.isDisposed());
+        o.dispose();
+        assertTrue(o.isDisposed());
+
+        Disposable d = Disposables.empty();
+
+        o.onSubscribe(d);
+
+        assertTrue(d.isDisposed());
+
+        Thread.currentThread().interrupt();
+        try {
+            o.blockingGet();
+            fail("Should have thrown");
+        } catch (RuntimeException ex) {
+            assertTrue(ex.toString(), ex.getCause() instanceof InterruptedException);
+        }
+
+        Thread.interrupted();
+
+        o.onError(new TestException());
+
+        try {
+            o.blockingGet();
+            fail("Should have thrown");
+        } catch (TestException ex) {
+            // expected
+        }
     }
 }

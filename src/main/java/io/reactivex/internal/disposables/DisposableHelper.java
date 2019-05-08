@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.disposables;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.disposables.Disposable;
+import io.reactivex.exceptions.ProtocolViolationException;
 import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -29,10 +30,21 @@ public enum DisposableHelper implements Disposable {
     DISPOSED
     ;
 
+    /**
+     * Checks if the given Disposable is the common {@link #DISPOSED} enum value.
+     * @param d the disposable to check
+     * @return true if d is {@link #DISPOSED}
+     */
     public static boolean isDisposed(Disposable d) {
         return d == DISPOSED;
     }
 
+    /**
+     * Atomically sets the field and disposes the old contents.
+     * @param field the target field
+     * @param d the new Disposable to set
+     * @return true if successful, false if the field contains the {@link #DISPOSED} instance.
+     */
     public static boolean set(AtomicReference<Disposable> field, Disposable d) {
         for (;;) {
             Disposable current = field.get();
@@ -100,7 +112,7 @@ public enum DisposableHelper implements Disposable {
     /**
      * Atomically disposes the Disposable in the field if not already disposed.
      * @param field the target field
-     * @return true if the curren thread managed to dispose the Disposable
+     * @return true if the current thread managed to dispose the Disposable
      */
     public static boolean dispose(AtomicReference<Disposable> field) {
         Disposable current = field.get();
@@ -141,7 +153,24 @@ public enum DisposableHelper implements Disposable {
      * Reports that the disposable is already set to the RxJavaPlugins error handler.
      */
     public static void reportDisposableSet() {
-        RxJavaPlugins.onError(new IllegalStateException("Disposable already set!"));
+        RxJavaPlugins.onError(new ProtocolViolationException("Disposable already set!"));
+    }
+
+    /**
+     * Atomically tries to set the given Disposable on the field if it is null or disposes it if
+     * the field contains {@link #DISPOSED}.
+     * @param field the target field
+     * @param d the disposable to set
+     * @return true if successful, false otherwise
+     */
+    public static boolean trySet(AtomicReference<Disposable> field, Disposable d) {
+        if (!field.compareAndSet(null, d)) {
+            if (field.get() == DISPOSED) {
+                d.dispose();
+            }
+            return false;
+        }
+        return true;
     }
 
     @Override

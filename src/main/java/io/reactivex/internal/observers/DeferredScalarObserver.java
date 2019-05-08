@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -29,22 +29,22 @@ implements Observer<T> {
     private static final long serialVersionUID = -266195175408988651L;
 
     /** The upstream disposable. */
-    protected Disposable s;
+    protected Disposable upstream;
 
     /**
      * Creates a DeferredScalarObserver instance and wraps a downstream Observer.
-     * @param actual the downstream subscriber, not null (not verified)
+     * @param downstream the downstream subscriber, not null (not verified)
      */
-    public DeferredScalarObserver(Observer<? super R> actual) {
-        super(actual);
+    public DeferredScalarObserver(Observer<? super R> downstream) {
+        super(downstream);
     }
 
     @Override
-    public void onSubscribe(Disposable s) {
-        if (DisposableHelper.validate(this.s, s)) {
-            this.s = s;
+    public void onSubscribe(Disposable d) {
+        if (DisposableHelper.validate(this.upstream, d)) {
+            this.upstream = d;
 
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
         }
     }
 
@@ -68,6 +68,6 @@ implements Observer<T> {
     @Override
     public void dispose() {
         super.dispose();
-        s.dispose();
+        upstream.dispose();
     }
 }

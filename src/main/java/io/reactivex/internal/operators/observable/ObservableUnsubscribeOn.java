@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -36,28 +36,28 @@ public final class ObservableUnsubscribeOn<T> extends AbstractObservableWithUpst
 
         private static final long serialVersionUID = 1015244841293359600L;
 
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final Scheduler scheduler;
 
-        Disposable s;
+        Disposable upstream;
 
         UnsubscribeObserver(Observer<? super T> actual, Scheduler scheduler) {
-            this.actual = actual;
+            this.downstream = actual;
             this.scheduler = scheduler;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T t) {
             if (!get()) {
-                actual.onNext(t);
+                downstream.onNext(t);
             }
         }
 
@@ -67,31 +67,33 @@ public final class ObservableUnsubscribeOn<T> extends AbstractObservableWithUpst
                 RxJavaPlugins.onError(t);
                 return;
             }
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             if (!get()) {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
         @Override
         public void dispose() {
             if (compareAndSet(false, true)) {
-                scheduler.scheduleDirect(new Runnable() {
-                    @Override
-                    public void run() {
-                        s.dispose();
-                    }
-                });
+                scheduler.scheduleDirect(new DisposeTask());
             }
         }
 
         @Override
         public boolean isDisposed() {
             return get();
+        }
+
+        final class DisposeTask implements Runnable {
+            @Override
+            public void run() {
+                upstream.dispose();
+            }
         }
     }
 }

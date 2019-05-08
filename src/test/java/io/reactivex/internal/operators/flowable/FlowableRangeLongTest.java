@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,46 +13,41 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import io.reactivex.Flowable;
-import io.reactivex.TestHelper;
-import io.reactivex.functions.Consumer;
-import io.reactivex.subscribers.DefaultSubscriber;
-import io.reactivex.subscribers.TestSubscriber;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+import java.util.*;
+import java.util.concurrent.atomic.*;
+
 import org.junit.Test;
 import org.reactivestreams.Subscriber;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import io.reactivex.*;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.subscribers.*;
 
 public class FlowableRangeLongTest {
 
     @Test
     public void testRangeStartAt2Count3() {
-        Subscriber<Long> observer = TestHelper.mockSubscriber();
+        Subscriber<Long> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.rangeLong(2, 3).subscribe(observer);
+        Flowable.rangeLong(2, 3).subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(2L);
-        verify(observer, times(1)).onNext(3L);
-        verify(observer, times(1)).onNext(4L);
-        verify(observer, never()).onNext(5L);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(2L);
+        verify(subscriber, times(1)).onNext(3L);
+        verify(subscriber, times(1)).onNext(4L);
+        verify(subscriber, never()).onNext(5L);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testRangeUnsubscribe() {
-        Subscriber<Long> observer = TestHelper.mockSubscriber();
+        Subscriber<Long> subscriber = TestHelper.mockSubscriber();
 
         final AtomicInteger count = new AtomicInteger();
 
@@ -62,14 +57,14 @@ public class FlowableRangeLongTest {
                 count.incrementAndGet();
             }
         })
-        .take(3).subscribe(observer);
+        .take(3).subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(1L);
-        verify(observer, times(1)).onNext(2L);
-        verify(observer, times(1)).onNext(3L);
-        verify(observer, never()).onNext(4L);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(1L);
+        verify(subscriber, times(1)).onNext(2L);
+        verify(subscriber, times(1)).onNext(3L);
+        verify(subscriber, never()).onNext(4L);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
         assertEquals(3, count.get());
     }
 
@@ -100,14 +95,14 @@ public class FlowableRangeLongTest {
 
     @Test
     public void testBackpressureViaRequest() {
-        Flowable<Long> o = Flowable.rangeLong(1, Flowable.bufferSize());
+        Flowable<Long> f = Flowable.rangeLong(1, Flowable.bufferSize());
 
         TestSubscriber<Long> ts = new TestSubscriber<Long>(0L);
 
         ts.assertNoValues();
         ts.request(1);
 
-        o.subscribe(ts);
+        f.subscribe(ts);
 
         ts.assertValue(1L);
 
@@ -128,14 +123,14 @@ public class FlowableRangeLongTest {
             list.add(i);
         }
 
-        Flowable<Long> o = Flowable.rangeLong(1, list.size());
+        Flowable<Long> f = Flowable.rangeLong(1, list.size());
 
         TestSubscriber<Long> ts = new TestSubscriber<Long>(0L);
 
         ts.assertNoValues();
         ts.request(Long.MAX_VALUE); // infinite
 
-        o.subscribe(ts);
+        f.subscribe(ts);
 
         ts.assertValueSequence(list);
         ts.assertTerminated();
@@ -169,18 +164,21 @@ public class FlowableRangeLongTest {
         ts.assertValueSequence(list);
         ts.assertTerminated();
     }
+
     @Test
     public void testWithBackpressure1() {
         for (long i = 0; i < 100; i++) {
             testWithBackpressureOneByOne(i);
         }
     }
+
     @Test
     public void testWithBackpressureAllAtOnce() {
         for (long i = 0; i < 100; i++) {
             testWithBackpressureAllAtOnce(i);
         }
     }
+
     @Test
     public void testWithBackpressureRequestWayMore() {
         Flowable<Long> source = Flowable.rangeLong(50, 100);
@@ -291,5 +289,253 @@ public class FlowableRangeLongTest {
         Flowable.rangeLong(5495454L, 1L)
             .test()
             .assertResult(5495454L);
+    }
+
+    @Test
+    public void fused() {
+        TestSubscriber<Long> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        Flowable.rangeLong(1, 2).subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.SYNC)
+        .assertResult(1L, 2L);
+    }
+
+    @Test
+    public void fusedReject() {
+        TestSubscriber<Long> ts = SubscriberFusion.newTest(QueueFuseable.ASYNC);
+
+        Flowable.rangeLong(1, 2).subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.NONE)
+        .assertResult(1L, 2L);
+    }
+
+    @Test
+    public void disposed() {
+        TestHelper.checkDisposed(Flowable.rangeLong(1, 2));
+    }
+
+    @Test
+    public void fusedClearIsEmpty() {
+        TestHelper.checkFusedIsEmptyClear(Flowable.rangeLong(1, 2));
+    }
+
+    @Test
+    public void noOverflow() {
+        Flowable.rangeLong(Long.MAX_VALUE - 1, 2);
+        Flowable.rangeLong(Long.MIN_VALUE, 2);
+        Flowable.rangeLong(Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    @Test
+    public void conditionalNormal() {
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .test()
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.rangeLong(1L, 5L));
+
+        TestHelper.assertBadRequestReported(Flowable.rangeLong(1L, 5L).filter(Functions.alwaysTrue()));
+    }
+
+    @Test
+    public void conditionalNormalSlowpath() {
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .test(5)
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void conditionalSlowPathTakeExact() {
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .take(5)
+        .test()
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void slowPathTakeExact() {
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .take(5)
+        .test()
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void conditionalSlowPathRebatch() {
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .rebatchRequests(1)
+        .test()
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void slowPathRebatch() {
+        Flowable.rangeLong(1L, 5L)
+        .rebatchRequests(1)
+        .test()
+        .assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void slowPathCancel() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>(2L) {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .subscribe(ts);
+
+        ts.assertResult(1L);
+    }
+
+    @Test
+    public void fastPathCancel() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>() {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .subscribe(ts);
+
+        ts.assertResult(1L);
+    }
+
+    @Test
+    public void conditionalSlowPathCancel() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>(1L) {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1L);
+    }
+
+    @Test
+    public void conditionalFastPathCancel() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>() {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1L);
+    }
+
+    @Test
+    public void conditionalRequestOneByOne() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>(1L) {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                request(1);
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .filter(new Predicate<Long>() {
+            @Override
+            public boolean test(Long v) throws Exception {
+                return v % 2 == 0;
+            }
+        })
+        .subscribe(ts);
+
+        ts.assertResult(2L, 4L);
+    }
+
+    @Test
+    public void conditionalRequestOneByOne2() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>(1L) {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                request(1);
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void fastPathCancelExact() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>() {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                if (t == 5L) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .subscribe(ts);
+
+        ts.assertResult(1L, 2L, 3L, 4L, 5L);
+    }
+
+    @Test
+    public void conditionalFastPathCancelExact() {
+        TestSubscriber<Long> ts = new TestSubscriber<Long>() {
+            @Override
+            public void onNext(Long t) {
+                super.onNext(t);
+                if (t == 5L) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.rangeLong(1L, 5L)
+        .filter(new Predicate<Long>() {
+            @Override
+            public boolean test(Long v) throws Exception {
+                return v % 2 == 0;
+            }
+        })
+        .subscribe(ts);
+
+        ts.assertResult(2L, 4L);
     }
 }

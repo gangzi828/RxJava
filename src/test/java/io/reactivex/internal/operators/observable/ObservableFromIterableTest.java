@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,7 +13,8 @@
 
 package io.reactivex.internal.operators.observable;
 
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.*;
@@ -25,7 +26,11 @@ import org.mockito.Mockito;
 import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.internal.util.CrashingIterable;
 import io.reactivex.observers.*;
 
 public class ObservableFromIterableTest {
@@ -113,12 +118,12 @@ public class ObservableFromIterableTest {
     public void testNoBackpressure() {
         Observable<Integer> o = Observable.fromIterable(Arrays.asList(1, 2, 3, 4, 5));
 
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
 
-        o.subscribe(ts);
+        o.subscribe(to);
 
-        ts.assertValues(1, 2, 3, 4, 5);
-        ts.assertTerminated();
+        to.assertValues(1, 2, 3, 4, 5);
+        to.assertTerminated();
     }
 
     @Test
@@ -126,13 +131,13 @@ public class ObservableFromIterableTest {
         Observable<Integer> o = Observable.fromIterable(Arrays.asList(1, 2, 3));
 
         for (int i = 0; i < 10; i++) {
-            TestObserver<Integer> ts = new TestObserver<Integer>();
+            TestObserver<Integer> to = new TestObserver<Integer>();
 
-            o.subscribe(ts);
+            o.subscribe(to);
 
-            ts.assertValues(1, 2, 3);
-            ts.assertNoErrors();
-            ts.assertComplete();
+            to.assertValues(1, 2, 3);
+            to.assertNoErrors();
+            to.assertComplete();
         }
     }
 
@@ -242,5 +247,106 @@ public class ObservableFromIterableTest {
         to.assertValues(1, 2, 2, 3, 3, 4, 4, 5);
         to.assertNoErrors();
         to.assertComplete();
+    }
+
+    @Test
+    public void iteratorThrows() {
+        Observable.fromIterable(new CrashingIterable(1, 100, 100))
+        .test()
+        .assertFailureAndMessage(TestException.class, "iterator()");
+    }
+
+    @Test
+    public void hasNext2Throws() {
+        Observable.fromIterable(new CrashingIterable(100, 2, 100))
+        .test()
+        .assertFailureAndMessage(TestException.class, "hasNext()", 0);
+    }
+
+    @Test
+    public void hasNextCancels() {
+        final TestObserver<Integer> to = new TestObserver<Integer>();
+
+        Observable.fromIterable(new Iterable<Integer>() {
+            @Override
+            public Iterator<Integer> iterator() {
+                return new Iterator<Integer>() {
+                    int count;
+
+                    @Override
+                    public boolean hasNext() {
+                        if (++count == 2) {
+                            to.cancel();
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public Integer next() {
+                        return 1;
+                    }
+
+                    @Override
+                    public void remove() {
+                        throw new UnsupportedOperationException();
+                    }
+                };
+            }
+        })
+        .subscribe(to);
+
+        to.assertValue(1)
+        .assertNoErrors()
+        .assertNotComplete();
+    }
+
+    @Test
+    public void fusionRejected() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ASYNC);
+
+        Observable.fromIterable(Arrays.asList(1, 2, 3))
+        .subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.NONE)
+        .assertResult(1, 2, 3);
+    }
+
+    @Test
+    public void fusionClear() {
+        Observable.fromIterable(Arrays.asList(1, 2, 3))
+        .subscribe(new Observer<Integer>() {
+            @Override
+            public void onSubscribe(Disposable d) {
+                @SuppressWarnings("unchecked")
+                QueueDisposable<Integer> qd = (QueueDisposable<Integer>)d;
+
+                qd.requestFusion(QueueFuseable.ANY);
+
+                try {
+                    assertEquals(1, qd.poll().intValue());
+                } catch (Throwable ex) {
+                    fail(ex.toString());
+                }
+
+                qd.clear();
+                try {
+                    assertNull(qd.poll());
+                } catch (Throwable ex) {
+                    fail(ex.toString());
+                }
+            }
+
+            @Override
+            public void onNext(Integer value) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
     }
 }

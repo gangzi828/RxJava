@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -35,23 +35,23 @@ public final class ObservableTakeLast<T> extends AbstractObservableWithUpstream<
     static final class TakeLastObserver<T> extends ArrayDeque<T> implements Observer<T>, Disposable {
 
         private static final long serialVersionUID = 7240042530241604978L;
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final int count;
 
-        Disposable s;
+        Disposable upstream;
 
         volatile boolean cancelled;
 
         TakeLastObserver(Observer<? super T> actual, int count) {
-            this.actual = actual;
+            this.downstream = actual;
             this.count = count;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
@@ -65,15 +65,12 @@ public final class ObservableTakeLast<T> extends AbstractObservableWithUpstream<
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            if (cancelled) {
-                return;
-            }
-            Observer<? super T> a = actual;
+            Observer<? super T> a = downstream;
             for (;;) {
                 if (cancelled) {
                     return;
@@ -93,7 +90,7 @@ public final class ObservableTakeLast<T> extends AbstractObservableWithUpstream<
         public void dispose() {
             if (!cancelled) {
                 cancelled = true;
-                s.dispose();
+                upstream.dispose();
             }
         }
 

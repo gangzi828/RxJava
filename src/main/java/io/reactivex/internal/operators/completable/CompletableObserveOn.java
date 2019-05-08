@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,9 +13,11 @@
 
 package io.reactivex.internal.operators.completable;
 
+import java.util.concurrent.atomic.AtomicReference;
+
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.ArrayCompositeDisposable;
+import io.reactivex.internal.disposables.DisposableHelper;
 
 public final class CompletableObserveOn extends Completable {
 
@@ -28,50 +30,65 @@ public final class CompletableObserveOn extends Completable {
     }
 
     @Override
-    protected void subscribeActual(final CompletableObserver s) {
+    protected void subscribeActual(final CompletableObserver observer) {
+        source.subscribe(new ObserveOnCompletableObserver(observer, scheduler));
+    }
 
-        final ArrayCompositeDisposable ad = new ArrayCompositeDisposable(2);
-        final Scheduler.Worker w = scheduler.createWorker();
-        ad.set(0, w);
+    static final class ObserveOnCompletableObserver
+    extends AtomicReference<Disposable>
+    implements CompletableObserver, Disposable, Runnable {
 
-        s.onSubscribe(ad);
+        private static final long serialVersionUID = 8571289934935992137L;
 
-        source.subscribe(new CompletableObserver() {
+        final CompletableObserver downstream;
 
-            @Override
-            public void onComplete() {
-                w.schedule(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            s.onComplete();
-                        } finally {
-                            ad.dispose();
-                        }
-                    }
-                });
+        final Scheduler scheduler;
+
+        Throwable error;
+
+        ObserveOnCompletableObserver(CompletableObserver actual, Scheduler scheduler) {
+            this.downstream = actual;
+            this.scheduler = scheduler;
+        }
+
+        @Override
+        public void dispose() {
+            DisposableHelper.dispose(this);
+        }
+
+        @Override
+        public boolean isDisposed() {
+            return DisposableHelper.isDisposed(get());
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.setOnce(this, d)) {
+                downstream.onSubscribe(this);
             }
+        }
 
-            @Override
-            public void onError(final Throwable e) {
-                w.schedule(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            s.onError(e);
-                        } finally {
-                            ad.dispose();
-                        }
-                    }
-                });
+        @Override
+        public void onError(Throwable e) {
+            this.error = e;
+            DisposableHelper.replace(this, scheduler.scheduleDirect(this));
+        }
+
+        @Override
+        public void onComplete() {
+            DisposableHelper.replace(this, scheduler.scheduleDirect(this));
+        }
+
+        @Override
+        public void run() {
+            Throwable ex = error;
+            if (ex != null) {
+                error = null;
+                downstream.onError(ex);
+            } else {
+                downstream.onComplete();
             }
-
-            @Override
-            public void onSubscribe(Disposable d) {
-                ad.set(1, d);
-            }
-
-        });
+        }
     }
 
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,8 +15,10 @@ package io.reactivex.internal.operators.flowable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.SubscriptionArbiter;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -24,7 +26,7 @@ public final class FlowableOnErrorNext<T> extends AbstractFlowableWithUpstream<T
     final Function<? super Throwable, ? extends Publisher<? extends T>> nextSupplier;
     final boolean allowFatal;
 
-    public FlowableOnErrorNext(Publisher<T> source,
+    public FlowableOnErrorNext(Flowable<T> source,
             Function<? super Throwable, ? extends Publisher<? extends T>> nextSupplier, boolean allowFatal) {
         super(source);
         this.nextSupplier = nextSupplier;
@@ -34,30 +36,37 @@ public final class FlowableOnErrorNext<T> extends AbstractFlowableWithUpstream<T
     @Override
     protected void subscribeActual(Subscriber<? super T> s) {
         OnErrorNextSubscriber<T> parent = new OnErrorNextSubscriber<T>(s, nextSupplier, allowFatal);
-        s.onSubscribe(parent.arbiter);
+        s.onSubscribe(parent);
         source.subscribe(parent);
     }
 
-    static final class OnErrorNextSubscriber<T> implements Subscriber<T> {
-        final Subscriber<? super T> actual;
+    static final class OnErrorNextSubscriber<T>
+    extends SubscriptionArbiter
+    implements FlowableSubscriber<T> {
+        private static final long serialVersionUID = 4063763155303814625L;
+
+        final Subscriber<? super T> downstream;
+
         final Function<? super Throwable, ? extends Publisher<? extends T>> nextSupplier;
+
         final boolean allowFatal;
-        final SubscriptionArbiter arbiter;
 
         boolean once;
 
         boolean done;
 
+        long produced;
+
         OnErrorNextSubscriber(Subscriber<? super T> actual, Function<? super Throwable, ? extends Publisher<? extends T>> nextSupplier, boolean allowFatal) {
-            this.actual = actual;
+            super(false);
+            this.downstream = actual;
             this.nextSupplier = nextSupplier;
             this.allowFatal = allowFatal;
-            this.arbiter = new SubscriptionArbiter();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            arbiter.setSubscription(s);
+            setSubscription(s);
         }
 
         @Override
@@ -65,10 +74,10 @@ public final class FlowableOnErrorNext<T> extends AbstractFlowableWithUpstream<T
             if (done) {
                 return;
             }
-            actual.onNext(t);
             if (!once) {
-                arbiter.produced(1L);
+                produced++;
             }
+            downstream.onNext(t);
         }
 
         @Override
@@ -78,31 +87,29 @@ public final class FlowableOnErrorNext<T> extends AbstractFlowableWithUpstream<T
                     RxJavaPlugins.onError(t);
                     return;
                 }
-                actual.onError(t);
+                downstream.onError(t);
                 return;
             }
             once = true;
 
             if (allowFatal && !(t instanceof Exception)) {
-                actual.onError(t);
+                downstream.onError(t);
                 return;
             }
 
             Publisher<? extends T> p;
 
             try {
-                p = nextSupplier.apply(t);
+                p = ObjectHelper.requireNonNull(nextSupplier.apply(t), "The nextSupplier returned a null Publisher");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                actual.onError(new CompositeException(e, t));
+                downstream.onError(new CompositeException(t, e));
                 return;
             }
 
-            if (p == null) {
-                NullPointerException npe = new NullPointerException("Publisher is null");
-                npe.initCause(t);
-                actual.onError(npe);
-                return;
+            long mainProduced = produced;
+            if (mainProduced != 0L) {
+                produced(mainProduced);
             }
 
             p.subscribe(this);
@@ -115,7 +122,7 @@ public final class FlowableOnErrorNext<T> extends AbstractFlowableWithUpstream<T
             }
             done = true;
             once = true;
-            actual.onComplete();
+            downstream.onComplete();
         }
     }
 }

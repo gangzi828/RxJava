@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Function;
@@ -39,7 +40,7 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
 
     final boolean delayErrors;
 
-    public FlowableFlatMapCompletable(Publisher<T> source,
+    public FlowableFlatMapCompletable(Flowable<T> source,
             Function<? super T, ? extends CompletableSource> mapper, boolean delayErrors,
             int maxConcurrency) {
         super(source);
@@ -49,15 +50,15 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
     }
 
     @Override
-    protected void subscribeActual(Subscriber<? super T> observer) {
-        source.subscribe(new FlatMapCompletableMainSubscriber<T>(observer, mapper, delayErrors, maxConcurrency));
+    protected void subscribeActual(Subscriber<? super T> subscriber) {
+        source.subscribe(new FlatMapCompletableMainSubscriber<T>(subscriber, mapper, delayErrors, maxConcurrency));
     }
 
     static final class FlatMapCompletableMainSubscriber<T> extends BasicIntQueueSubscription<T>
-    implements Subscriber<T> {
+    implements FlowableSubscriber<T> {
         private static final long serialVersionUID = 8443155186132538303L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
         final AtomicThrowable errors;
 
@@ -69,12 +70,14 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
 
         final int maxConcurrency;
 
-        Subscription s;
+        Subscription upstream;
 
-        FlatMapCompletableMainSubscriber(Subscriber<? super T> observer,
+        volatile boolean cancelled;
+
+        FlatMapCompletableMainSubscriber(Subscriber<? super T> subscriber,
                 Function<? super T, ? extends CompletableSource> mapper, boolean delayErrors,
                 int maxConcurrency) {
-            this.actual = observer;
+            this.downstream = subscriber;
             this.mapper = mapper;
             this.delayErrors = delayErrors;
             this.errors = new AtomicThrowable();
@@ -85,10 +88,10 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 int m = maxConcurrency;
                 if (m == Integer.MAX_VALUE) {
@@ -107,7 +110,7 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
                 cs = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null CompletableSource");
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                s.cancel();
+                upstream.cancel();
                 onError(ex);
                 return;
             }
@@ -116,9 +119,9 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
 
             InnerConsumer inner = new InnerConsumer();
 
-            set.add(inner);
-
-            cs.subscribe(inner);
+            if (!cancelled && set.add(inner)) {
+                cs.subscribe(inner);
+            }
         }
 
         @Override
@@ -127,19 +130,17 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
                 if (delayErrors) {
                     if (decrementAndGet() == 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     } else {
                         if (maxConcurrency != Integer.MAX_VALUE) {
-                            s.request(1);
+                            upstream.request(1);
                         }
                     }
                 } else {
                     cancel();
                     if (getAndSet(0) > 0) {
                         Throwable ex = errors.terminate();
-                        actual.onError(ex);
-                        return;
+                        downstream.onError(ex);
                     }
                 }
             } else {
@@ -150,24 +151,23 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
         @Override
         public void onComplete() {
             if (decrementAndGet() == 0) {
-                if (delayErrors) {
-                    Throwable ex = errors.terminate();
-                    if (ex != null) {
-                        actual.onError(ex);
-                        return;
-                    }
+                Throwable ex = errors.terminate();
+                if (ex != null) {
+                    downstream.onError(ex);
+                } else {
+                    downstream.onComplete();
                 }
-                actual.onComplete();
             } else {
                 if (maxConcurrency != Integer.MAX_VALUE) {
-                    s.request(1);
+                    upstream.request(1);
                 }
             }
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            cancelled = true;
+            upstream.cancel();
             set.dispose();
         }
 
@@ -176,6 +176,7 @@ public final class FlowableFlatMapCompletable<T> extends AbstractFlowableWithUps
             // ignored, no values emitted
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             return null; // always empty

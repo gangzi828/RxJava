@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,8 @@
 
 package io.reactivex.internal.operators.observable;
 
+import java.util.NoSuchElementException;
+
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.internal.disposables.DisposableHelper;
@@ -21,52 +23,56 @@ import io.reactivex.plugins.RxJavaPlugins;
 public final class ObservableElementAt<T> extends AbstractObservableWithUpstream<T, T> {
     final long index;
     final T defaultValue;
-    public ObservableElementAt(ObservableSource<T> source, long index, T defaultValue) {
+    final boolean errorOnFewer;
+
+    public ObservableElementAt(ObservableSource<T> source, long index, T defaultValue, boolean errorOnFewer) {
         super(source);
         this.index = index;
         this.defaultValue = defaultValue;
+        this.errorOnFewer = errorOnFewer;
     }
+
     @Override
     public void subscribeActual(Observer<? super T> t) {
-        source.subscribe(new ElementAtObserver<T>(t, index, defaultValue));
+        source.subscribe(new ElementAtObserver<T>(t, index, defaultValue, errorOnFewer));
     }
 
     static final class ElementAtObserver<T> implements Observer<T>, Disposable {
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final long index;
         final T defaultValue;
+        final boolean errorOnFewer;
 
-        Disposable s;
+        Disposable upstream;
 
         long count;
 
         boolean done;
 
-        ElementAtObserver(Observer<? super T> actual, long index, T defaultValue) {
-            this.actual = actual;
+        ElementAtObserver(Observer<? super T> actual, long index, T defaultValue, boolean errorOnFewer) {
+            this.downstream = actual;
             this.index = index;
             this.defaultValue = defaultValue;
+            this.errorOnFewer = errorOnFewer;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -76,9 +82,9 @@ public final class ObservableElementAt<T> extends AbstractObservableWithUpstream
             long c = count;
             if (c == index) {
                 done = true;
-                s.dispose();
-                actual.onNext(t);
-                actual.onComplete();
+                upstream.dispose();
+                downstream.onNext(t);
+                downstream.onComplete();
                 return;
             }
             count = c + 1;
@@ -91,18 +97,22 @@ public final class ObservableElementAt<T> extends AbstractObservableWithUpstream
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            if (index <= count && !done) {
+            if (!done) {
                 done = true;
                 T v = defaultValue;
-                if (v != null) {
-                    actual.onNext(v);
+                if (v == null && errorOnFewer) {
+                    downstream.onError(new NoSuchElementException());
+                } else {
+                    if (v != null) {
+                        downstream.onNext(v);
+                    }
+                    downstream.onComplete();
                 }
-                actual.onComplete();
             }
         }
     }

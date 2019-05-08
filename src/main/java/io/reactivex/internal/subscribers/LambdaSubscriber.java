@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,15 +15,19 @@ package io.reactivex.internal.subscribers;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.reactivestreams.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.observers.LambdaConsumerIntrospection;
+import org.reactivestreams.Subscription;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
-public final class LambdaSubscriber<T> extends AtomicReference<Subscription> implements Subscriber<T>, Subscription, Disposable {
+public final class LambdaSubscriber<T> extends AtomicReference<Subscription>
+        implements FlowableSubscriber<T>, Subscription, Disposable, LambdaConsumerIntrospection {
 
     private static final long serialVersionUID = -7251123623727029452L;
     final Consumer<? super T> onNext;
@@ -113,5 +117,10 @@ public final class LambdaSubscriber<T> extends AtomicReference<Subscription> imp
     @Override
     public void cancel() {
         SubscriptionHelper.cancel(this);
+    }
+
+    @Override
+    public boolean hasCustomOnError() {
+        return onError != Functions.ON_ERROR_MISSING;
     }
 }

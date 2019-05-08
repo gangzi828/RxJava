@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,6 +15,7 @@ package io.reactivex.internal.subscribers;
 
 import org.reactivestreams.*;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.internal.fuseable.QueueSubscription;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
@@ -25,13 +26,13 @@ import io.reactivex.plugins.RxJavaPlugins;
  * @param <T> the upstream value type
  * @param <R> the downstream value type
  */
-public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, QueueSubscription<R> {
+public abstract class BasicFuseableSubscriber<T, R> implements FlowableSubscriber<T>, QueueSubscription<R> {
 
     /** The downstream subscriber. */
-    protected final Subscriber<? super R> actual;
+    protected final Subscriber<? super R> downstream;
 
     /** The upstream subscription. */
-    protected Subscription s;
+    protected Subscription upstream;
 
     /** The upstream's QueueSubscription if not null. */
     protected QueueSubscription<T> qs;
@@ -44,26 +45,26 @@ public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, Qu
 
     /**
      * Construct a BasicFuseableSubscriber by wrapping the given subscriber.
-     * @param actual the subscriber, not null (not verified)
+     * @param downstream the subscriber, not null (not verified)
      */
-    public BasicFuseableSubscriber(Subscriber<? super R> actual) {
-        this.actual = actual;
+    public BasicFuseableSubscriber(Subscriber<? super R> downstream) {
+        this.downstream = downstream;
     }
 
     // final: fixed protocol steps to support fuseable and non-fuseable upstream
     @SuppressWarnings("unchecked")
     @Override
     public final void onSubscribe(Subscription s) {
-        if (SubscriptionHelper.validate(this.s, s)) {
+        if (SubscriptionHelper.validate(this.upstream, s)) {
 
-            this.s = s;
+            this.upstream = s;
             if (s instanceof QueueSubscription) {
                 this.qs = (QueueSubscription<T>)s;
             }
 
             if (beforeDownstream()) {
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 afterDownstream();
             }
@@ -97,7 +98,7 @@ public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, Qu
             return;
         }
         done = true;
-        actual.onError(t);
+        downstream.onError(t);
     }
 
     /**
@@ -106,7 +107,7 @@ public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, Qu
      */
     protected final void fail(Throwable t) {
         Exceptions.throwIfFatal(t);
-        s.cancel();
+        upstream.cancel();
         onError(t);
     }
 
@@ -116,28 +117,7 @@ public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, Qu
             return;
         }
         done = true;
-        actual.onComplete();
-    }
-
-    /**
-     * Calls the upstream's QueueSubscription.requestFusion with the mode and
-     * saves the established mode in {@link #sourceMode}.
-     * <p>
-     * If the upstream doesn't support fusion ({@link #qs} is null), the method
-     * returns {@link QueueSubscription#NONE}.
-     * @param mode the fusion mode requested
-     * @return the established fusion mode
-     */
-    protected final int transitiveFusion(int mode) {
-        QueueSubscription<T> qs = this.qs;
-        if (qs != null) {
-            int m = qs.requestFusion(mode);
-            if (m != NONE) {
-                sourceMode = m;
-            }
-            return m;
-        }
-        return NONE;
+        downstream.onComplete();
     }
 
     /**
@@ -170,12 +150,12 @@ public abstract class BasicFuseableSubscriber<T, R> implements Subscriber<T>, Qu
 
     @Override
     public void request(long n) {
-        s.request(n);
+        upstream.request(n);
     }
 
     @Override
     public void cancel() {
-        s.cancel();
+        upstream.cancel();
     }
 
     @Override

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,7 +15,8 @@ package io.reactivex.internal.operators.flowable;
 
 import org.junit.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
+import io.reactivex.functions.Function;
 
 public class FlowableCountTest {
     @Test
@@ -36,6 +37,30 @@ public class FlowableCountTest {
 
         Assert.assertEquals(10, Flowable.range(1, 10).count().blockingGet().intValue());
 
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.just(1).count());
+
+        TestHelper.checkDisposed(Flowable.just(1).count().toFlowable());
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Long>>() {
+            @Override
+            public Flowable<Long> apply(Flowable<Object> f) throws Exception {
+                return f.count().toFlowable();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeFlowableToSingle(new Function<Flowable<Object>, SingleSource<Long>>() {
+            @Override
+            public SingleSource<Long> apply(Flowable<Object> f) throws Exception {
+                return f.count();
+            }
+        });
     }
 
 }

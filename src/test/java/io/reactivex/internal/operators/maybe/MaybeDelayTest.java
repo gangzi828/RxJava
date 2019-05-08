@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -66,25 +66,25 @@ public class MaybeDelayTest {
     public void disposeDuringDelay() {
         TestScheduler scheduler = new TestScheduler();
 
-        TestObserver<Integer> ts = Maybe.just(1).delay(100, TimeUnit.MILLISECONDS, scheduler)
+        TestObserver<Integer> to = Maybe.just(1).delay(100, TimeUnit.MILLISECONDS, scheduler)
         .test();
 
-        ts.cancel();
+        to.cancel();
 
         scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
 
-        ts.assertEmpty();
+        to.assertEmpty();
     }
 
     @Test
     public void dispose() {
         PublishProcessor<Integer> pp = PublishProcessor.create();
 
-        TestObserver<Integer> ts = pp.singleElement().delay(100, TimeUnit.MILLISECONDS).test();
+        TestObserver<Integer> to = pp.singleElement().delay(100, TimeUnit.MILLISECONDS).test();
 
         assertTrue(pp.hasSubscribers());
 
-        ts.cancel();
+        to.cancel();
 
         assertFalse(pp.hasSubscribers());
     }

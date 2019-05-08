@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,13 +14,17 @@
 package io.reactivex.internal.operators.completable;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.junit.Test;
+import static org.junit.Assert.*;
+import org.junit.*;
 
 import io.reactivex.*;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
-import io.reactivex.functions.Consumer;
+import io.reactivex.functions.*;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public class CompletableDoOnTest {
 
@@ -51,5 +55,56 @@ public class CompletableDoOnTest {
 
         TestHelper.assertError(errors, 0, TestException.class, "Outer");
         TestHelper.assertError(errors, 1, TestException.class, "Inner");
+    }
+
+    @Test
+    public void doOnDisposeCalled() {
+        final AtomicBoolean atomicBoolean = new AtomicBoolean();
+
+        assertFalse(atomicBoolean.get());
+
+        Completable.complete()
+            .doOnDispose(new Action() {
+                @Override
+                public void run() throws Exception {
+                    atomicBoolean.set(true);
+                }
+            })
+            .test()
+            .assertResult()
+            .dispose();
+
+        assertTrue(atomicBoolean.get());
+    }
+
+    @Test
+    public void onSubscribeCrash() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            final Disposable bs = Disposables.empty();
+
+            new Completable() {
+                @Override
+                protected void subscribeActual(CompletableObserver observer) {
+                    observer.onSubscribe(bs);
+                    observer.onError(new TestException("Second"));
+                    observer.onComplete();
+                }
+            }
+            .doOnSubscribe(new Consumer<Disposable>() {
+                @Override
+                public void accept(Disposable d) throws Exception {
+                    throw new TestException("First");
+                }
+            })
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            assertTrue(bs.isDisposed());
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

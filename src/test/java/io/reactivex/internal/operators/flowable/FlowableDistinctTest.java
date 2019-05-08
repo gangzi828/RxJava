@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,14 +13,26 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+
+import java.util.*;
+import java.util.concurrent.Callable;
 
 import org.junit.*;
 import org.mockito.InOrder;
-import org.reactivestreams.Subscriber;
+import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.processors.UnicastProcessor;
+import io.reactivex.subscribers.*;
 
 public class FlowableDistinctTest {
 
@@ -119,5 +131,124 @@ public class FlowableDistinctTest {
         inOrder.verify(w, times(1)).onError(any(NullPointerException.class));
         inOrder.verify(w, never()).onNext(anyString());
         inOrder.verify(w, never()).onComplete();
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .distinct()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void fusedSync() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        Flowable.just(1, 1, 2, 1, 3, 2, 4, 5, 4)
+        .distinct()
+        .subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.SYNC)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void fusedAsync() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        UnicastProcessor<Integer> us = UnicastProcessor.create();
+
+        us
+        .distinct()
+        .subscribe(ts);
+
+        TestHelper.emit(us, 1, 1, 2, 1, 3, 2, 4, 5, 4);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.ASYNC)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void fusedClear() {
+        Flowable.just(1, 1, 2, 1, 3, 2, 4, 5, 4)
+        .distinct()
+        .subscribe(new FlowableSubscriber<Integer>() {
+            @Override
+            public void onSubscribe(Subscription s) {
+                QueueSubscription<?> qs = (QueueSubscription<?>)s;
+
+                assertFalse(qs.isEmpty());
+
+                qs.clear();
+
+                assertTrue(qs.isEmpty());
+            }
+
+            @Override
+            public void onNext(Integer value) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+    }
+
+    @Test
+    public void collectionSupplierThrows() {
+        Flowable.just(1)
+        .distinct(Functions.identity(), new Callable<Collection<Object>>() {
+            @Override
+            public Collection<Object> call() throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void collectionSupplierIsNull() {
+        Flowable.just(1)
+        .distinct(Functions.identity(), new Callable<Collection<Object>>() {
+            @Override
+            public Collection<Object> call() throws Exception {
+                return null;
+            }
+        })
+        .test()
+        .assertFailure(NullPointerException.class)
+        .assertErrorMessage("The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+
+                    subscriber.onNext(1);
+                    subscriber.onComplete();
+                    subscriber.onNext(2);
+                    subscriber.onError(new TestException());
+                    subscriber.onComplete();
+                }
+            }
+            .distinct()
+            .test()
+            .assertResult(1);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

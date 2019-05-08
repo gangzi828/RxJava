@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,8 +19,8 @@ import java.util.concurrent.atomic.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.exceptions.MissingBackpressureException;
+import io.reactivex.internal.disposables.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 import io.reactivex.subscribers.SerializedSubscriber;
@@ -30,36 +30,43 @@ public final class FlowableSampleTimed<T> extends AbstractFlowableWithUpstream<T
     final TimeUnit unit;
     final Scheduler scheduler;
 
-    public FlowableSampleTimed(Publisher<T> source, long period, TimeUnit unit, Scheduler scheduler) {
+    final boolean emitLast;
+
+    public FlowableSampleTimed(Flowable<T> source, long period, TimeUnit unit, Scheduler scheduler, boolean emitLast) {
         super(source);
         this.period = period;
         this.unit = unit;
         this.scheduler = scheduler;
+        this.emitLast = emitLast;
     }
 
     @Override
     protected void subscribeActual(Subscriber<? super T> s) {
         SerializedSubscriber<T> serial = new SerializedSubscriber<T>(s);
-        source.subscribe(new SampleTimedSubscriber<T>(serial, period, unit, scheduler));
+        if (emitLast) {
+            source.subscribe(new SampleTimedEmitLast<T>(serial, period, unit, scheduler));
+        } else {
+            source.subscribe(new SampleTimedNoLast<T>(serial, period, unit, scheduler));
+        }
     }
 
-    static final class SampleTimedSubscriber<T> extends AtomicReference<T> implements Subscriber<T>, Subscription, Runnable {
+    abstract static class SampleTimedSubscriber<T> extends AtomicReference<T> implements FlowableSubscriber<T>, Subscription, Runnable {
 
         private static final long serialVersionUID = -3517602651313910099L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final long period;
         final TimeUnit unit;
         final Scheduler scheduler;
 
         final AtomicLong requested = new AtomicLong();
 
-        final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
+        final SequentialDisposable timer = new SequentialDisposable();
 
-        Subscription s;
+        Subscription upstream;
 
         SampleTimedSubscriber(Subscriber<? super T> actual, long period, TimeUnit unit, Scheduler scheduler) {
-            this.actual = actual;
+            this.downstream = actual;
             this.period = period;
             this.unit = unit;
             this.scheduler = scheduler;
@@ -67,17 +74,11 @@ public final class FlowableSampleTimed<T> extends AbstractFlowableWithUpstream<T
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
-                if (timer.get() == null) {
-                    Disposable d = scheduler.schedulePeriodicallyDirect(this, period, period, unit);
-                    if (!timer.compareAndSet(null, d)) {
-                        d.dispose();
-                        return;
-                    }
-                    s.request(Long.MAX_VALUE);
-                }
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
+                timer.replace(scheduler.schedulePeriodicallyDirect(this, period, period, unit));
+                s.request(Long.MAX_VALUE);
             }
         }
 
@@ -89,13 +90,13 @@ public final class FlowableSampleTimed<T> extends AbstractFlowableWithUpstream<T
         @Override
         public void onError(Throwable t) {
             cancelTimer();
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             cancelTimer();
-            actual.onComplete();
+            complete();
         }
 
         void cancelTimer() {
@@ -112,22 +113,70 @@ public final class FlowableSampleTimed<T> extends AbstractFlowableWithUpstream<T
         @Override
         public void cancel() {
             cancelTimer();
-            s.cancel();
+            upstream.cancel();
         }
 
-        @Override
-        public void run() {
+        void emit() {
             T value = getAndSet(null);
             if (value != null) {
                 long r = requested.get();
                 if (r != 0L) {
-                    actual.onNext(value);
-                    if (r != Long.MAX_VALUE) {
-                        requested.decrementAndGet();
-                    }
+                    downstream.onNext(value);
+                    BackpressureHelper.produced(requested, 1);
                 } else {
                     cancel();
-                    actual.onError(new IllegalStateException("Couldn't emit value due to lack of requests!"));
+                    downstream.onError(new MissingBackpressureException("Couldn't emit value due to lack of requests!"));
+                }
+            }
+        }
+
+        abstract void complete();
+    }
+
+    static final class SampleTimedNoLast<T> extends SampleTimedSubscriber<T> {
+
+        private static final long serialVersionUID = -7139995637533111443L;
+
+        SampleTimedNoLast(Subscriber<? super T> actual, long period, TimeUnit unit, Scheduler scheduler) {
+            super(actual, period, unit, scheduler);
+        }
+
+        @Override
+        void complete() {
+            downstream.onComplete();
+        }
+
+        @Override
+        public void run() {
+            emit();
+        }
+    }
+
+    static final class SampleTimedEmitLast<T> extends SampleTimedSubscriber<T> {
+
+        private static final long serialVersionUID = -7139995637533111443L;
+
+        final AtomicInteger wip;
+
+        SampleTimedEmitLast(Subscriber<? super T> actual, long period, TimeUnit unit, Scheduler scheduler) {
+            super(actual, period, unit, scheduler);
+            this.wip = new AtomicInteger(1);
+        }
+
+        @Override
+        void complete() {
+            emit();
+            if (wip.decrementAndGet() == 0) {
+                downstream.onComplete();
+            }
+        }
+
+        @Override
+        public void run() {
+            if (wip.incrementAndGet() == 2) {
+                emit();
+                if (wip.decrementAndGet() == 0) {
+                    downstream.onComplete();
                 }
             }
         }

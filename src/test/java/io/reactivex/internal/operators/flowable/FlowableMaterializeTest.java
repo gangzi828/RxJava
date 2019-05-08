@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,7 +22,7 @@ import org.junit.Test;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.functions.Consumer;
+import io.reactivex.functions.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.*;
@@ -197,8 +197,6 @@ public class FlowableMaterializeTest {
         ts.dispose();
         ts.request(1);
         ts.assertNoValues();
-        // FIXME no longer assertable
-//        ts.assertUnsubscribed();
     }
 
     private static class TestNotificationSubscriber extends DefaultSubscriber<Notification<String>> {
@@ -235,8 +233,8 @@ public class FlowableMaterializeTest {
         volatile Thread t;
 
         @Override
-        public void subscribe(final Subscriber<? super String> observer) {
-            observer.onSubscribe(new BooleanSubscription());
+        public void subscribe(final Subscriber<? super String> subscriber) {
+            subscriber.onSubscribe(new BooleanSubscription());
             t = new Thread(new Runnable() {
 
                 @Override
@@ -249,14 +247,14 @@ public class FlowableMaterializeTest {
                             } catch (Throwable e) {
 
                             }
-                            observer.onError(new NullPointerException());
+                            subscriber.onError(new NullPointerException());
                             return;
                         } else {
-                            observer.onNext(s);
+                            subscriber.onNext(s);
                         }
                     }
                     System.out.println("subscription complete");
-                    observer.onComplete();
+                    subscriber.onComplete();
                 }
 
             });
@@ -281,5 +279,35 @@ public class FlowableMaterializeTest {
         ts.assertValueCount(6)
         .assertNoErrors()
         .assertComplete();
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.just(1).materialize());
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Notification<Object>>>() {
+            @Override
+            public Flowable<Notification<Object>> apply(Flowable<Object> f) throws Exception {
+                return f.materialize();
+            }
+        });
+    }
+
+    @Test
+    public void badSource() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Object>, Object>() {
+            @Override
+            public Object apply(Flowable<Object> f) throws Exception {
+                return f.materialize();
+            }
+        }, false, null, null, Notification.createOnComplete());
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.just(1).materialize());
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.fuseable.SimpleQueue;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.util.*;
 
 /**
@@ -29,16 +29,16 @@ import io.reactivex.internal.util.*;
  * @param <V> the value type the child subscriber accepts
  */
 public abstract class QueueDrainObserver<T, U, V> extends QueueDrainSubscriberPad2 implements Observer<T>, ObservableQueueDrain<U, V> {
-    protected final Observer<? super V> actual;
-    protected final SimpleQueue<U> queue;
+    protected final Observer<? super V> downstream;
+    protected final SimplePlainQueue<U> queue;
 
     protected volatile boolean cancelled;
 
     protected volatile boolean done;
     protected Throwable error;
 
-    public QueueDrainObserver(Observer<? super V> actual, SimpleQueue<U> queue) {
-        this.actual = actual;
+    public QueueDrainObserver(Observer<? super V> actual, SimplePlainQueue<U> queue) {
+        this.downstream = actual;
         this.queue = queue;
     }
 
@@ -62,11 +62,11 @@ public abstract class QueueDrainObserver<T, U, V> extends QueueDrainSubscriberPa
     }
 
     protected final void fastPathEmit(U value, boolean delayError, Disposable dispose) {
-        final Observer<? super V> s = actual;
-        final SimpleQueue<U> q = queue;
+        final Observer<? super V> observer = downstream;
+        final SimplePlainQueue<U> q = queue;
 
         if (wip.get() == 0 && wip.compareAndSet(0, 1)) {
-            accept(s, value);
+            accept(observer, value);
             if (leave(-1) == 0) {
                 return;
             }
@@ -76,21 +76,22 @@ public abstract class QueueDrainObserver<T, U, V> extends QueueDrainSubscriberPa
                 return;
             }
         }
-        QueueDrainHelper.drainLoop(q, s, delayError, dispose, this);
+        QueueDrainHelper.drainLoop(q, observer, delayError, dispose, this);
     }
 
     /**
      * Makes sure the fast-path emits in order.
      * @param value the value to emit or queue up
      * @param delayError if true, errors are delayed until the source has terminated
+     * @param disposable the resource to dispose if the drain terminates
      */
     protected final void fastPathOrderedEmit(U value, boolean delayError, Disposable disposable) {
-        final Observer<? super V> s = actual;
-        final SimpleQueue<U> q = queue;
+        final Observer<? super V> observer = downstream;
+        final SimplePlainQueue<U> q = queue;
 
         if (wip.get() == 0 && wip.compareAndSet(0, 1)) {
             if (q.isEmpty()) {
-                accept(s, value);
+                accept(observer, value);
                 if (leave(-1) == 0) {
                     return;
                 }
@@ -103,7 +104,7 @@ public abstract class QueueDrainObserver<T, U, V> extends QueueDrainSubscriberPa
                 return;
             }
         }
-        QueueDrainHelper.drainLoop(q, s, delayError, disposable, this);
+        QueueDrainHelper.drainLoop(q, observer, delayError, disposable, this);
     }
 
     @Override
@@ -116,10 +117,9 @@ public abstract class QueueDrainObserver<T, U, V> extends QueueDrainSubscriberPa
         return wip.addAndGet(m);
     }
 
-    public void drain(boolean delayError, Disposable dispose) {
-        if (enter()) {
-            QueueDrainHelper.drainLoop(queue, actual, delayError, dispose, this);
-        }
+    @Override
+    public void accept(Observer<? super V> a, U v) {
+        // ignored by default
     }
 }
 

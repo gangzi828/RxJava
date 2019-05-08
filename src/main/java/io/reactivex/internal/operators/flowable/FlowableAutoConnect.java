@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,9 +13,9 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import org.reactivestreams.Subscriber;
-
 import java.util.concurrent.atomic.AtomicInteger;
+
+import org.reactivestreams.Subscriber;
 
 import io.reactivex.Flowable;
 import io.reactivex.disposables.Disposable;
@@ -23,8 +23,8 @@ import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.functions.Consumer;
 
 /**
- * Wraps a ConnectableObservable and calls its connect() method once
- * the specified number of Subscribers have subscribed.
+ * Wraps a {@link ConnectableFlowable} and calls its {@code connect()} method once
+ * the specified number of {@link Subscriber}s have subscribed.
  *
  * @param <T> the value type of the chain
  */

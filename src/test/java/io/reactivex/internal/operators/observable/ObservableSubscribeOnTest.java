@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import static org.junit.Assert.assertEquals;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import io.reactivex.annotations.NonNull;
 import org.junit.*;
 
 import io.reactivex.*;
@@ -73,33 +74,33 @@ public class ObservableSubscribeOnTest {
     @Test
     @Ignore("ObservableSource.subscribe can't throw")
     public void testThrownErrorHandling() {
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
         Observable.unsafeCreate(new ObservableSource<String>() {
 
             @Override
-            public void subscribe(Observer<? super String> s) {
+            public void subscribe(Observer<? super String> observer) {
                 throw new RuntimeException("fail");
             }
 
-        }).subscribeOn(Schedulers.computation()).subscribe(ts);
-        ts.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
-        ts.assertTerminated();
+        }).subscribeOn(Schedulers.computation()).subscribe(to);
+        to.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
+        to.assertTerminated();
     }
 
     @Test
     public void testOnError() {
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
         Observable.unsafeCreate(new ObservableSource<String>() {
 
             @Override
-            public void subscribe(Observer<? super String> s) {
-                s.onSubscribe(Disposables.empty());
-                s.onError(new RuntimeException("fail"));
+            public void subscribe(Observer<? super String> observer) {
+                observer.onSubscribe(Disposables.empty());
+                observer.onError(new RuntimeException("fail"));
             }
 
-        }).subscribeOn(Schedulers.computation()).subscribe(ts);
-        ts.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
-        ts.assertTerminated();
+        }).subscribeOn(Schedulers.computation()).subscribe(to);
+        to.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
+        to.assertTerminated();
     }
 
     public static class SlowScheduler extends Scheduler {
@@ -117,6 +118,7 @@ public class ObservableSubscribeOnTest {
             this.unit = unit;
         }
 
+        @NonNull
         @Override
         public Worker createWorker() {
             return new SlowInner(actual.createWorker());
@@ -140,13 +142,15 @@ public class ObservableSubscribeOnTest {
                 return actualInner.isDisposed();
             }
 
+            @NonNull
             @Override
-            public Disposable schedule(final Runnable action) {
+            public Disposable schedule(@NonNull final Runnable action) {
                 return actualInner.schedule(action, delay, unit);
             }
 
+            @NonNull
             @Override
-            public Disposable schedule(final Runnable action, final long delayTime, final TimeUnit delayUnit) {
+            public Disposable schedule(@NonNull final Runnable action, final long delayTime, @NonNull final TimeUnit delayUnit) {
                 TimeUnit common = delayUnit.compareTo(unit) < 0 ? delayUnit : unit;
                 long t = common.convert(delayTime, delayUnit) + common.convert(delay, unit);
                 return actualInner.schedule(action, t, common);
@@ -158,7 +162,7 @@ public class ObservableSubscribeOnTest {
 
     @Test(timeout = 5000)
     public void testUnsubscribeInfiniteStream() throws InterruptedException {
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
         final AtomicInteger count = new AtomicInteger();
         Observable.unsafeCreate(new ObservableSource<Integer>() {
 
@@ -172,12 +176,12 @@ public class ObservableSubscribeOnTest {
                 }
             }
 
-        }).subscribeOn(Schedulers.newThread()).take(10).subscribe(ts);
+        }).subscribeOn(Schedulers.newThread()).take(10).subscribe(to);
 
-        ts.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
-        ts.dispose();
+        to.awaitTerminalEvent(1000, TimeUnit.MILLISECONDS);
+        to.dispose();
         Thread.sleep(200); // give time for the loop to continue
-        ts.assertValues(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+        to.assertValues(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
         assertEquals(10, count.get());
     }
 
@@ -200,4 +204,8 @@ public class ObservableSubscribeOnTest {
         .assertNotTerminated();
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).subscribeOn(Schedulers.single()));
+    }
 }

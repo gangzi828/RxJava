@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,114 +13,121 @@
 
 package io.reactivex.internal.operators.observable;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.*;
 
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.*;
-import io.reactivex.observers.SerializedObserver;
+import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.util.*;
 
 public final class ObservableTakeUntil<T, U> extends AbstractObservableWithUpstream<T, T> {
+
     final ObservableSource<? extends U> other;
+
     public ObservableTakeUntil(ObservableSource<T> source, ObservableSource<? extends U> other) {
         super(source);
         this.other = other;
     }
+
     @Override
     public void subscribeActual(Observer<? super T> child) {
-        final SerializedObserver<T> serial = new SerializedObserver<T>(child);
+        TakeUntilMainObserver<T, U> parent = new TakeUntilMainObserver<T, U>(child);
+        child.onSubscribe(parent);
 
-        final ArrayCompositeDisposable frc = new ArrayCompositeDisposable(2);
-
-        final TakeUntilObserver<T> tus = new TakeUntilObserver<T>(serial, frc);
-
-        other.subscribe(new Observer<U>() {
-            @Override
-            public void onSubscribe(Disposable s) {
-                frc.setResource(1, s);
-            }
-            @Override
-            public void onNext(U t) {
-                frc.dispose();
-                if (tus.compareAndSet(false, true)) {
-                    EmptyDisposable.complete(serial);
-                } else {
-                    serial.onComplete();
-                }
-            }
-            @Override
-            public void onError(Throwable t) {
-                frc.dispose();
-                if (tus.compareAndSet(false, true)) {
-                    EmptyDisposable.error(t, serial);
-                } else {
-                    serial.onError(t);
-                }
-            }
-            @Override
-            public void onComplete() {
-                frc.dispose();
-                if (tus.compareAndSet(false, true)) {
-                    EmptyDisposable.complete(serial);
-                } else {
-                    serial.onComplete();
-                }
-            }
-        });
-
-        source.subscribe(tus);
+        other.subscribe(parent.otherObserver);
+        source.subscribe(parent);
     }
 
-    static final class TakeUntilObserver<T> extends AtomicBoolean implements Observer<T>, Disposable {
+    static final class TakeUntilMainObserver<T, U> extends AtomicInteger
+    implements Observer<T>, Disposable {
 
-        private static final long serialVersionUID = 3451719290311127173L;
-        final Observer<? super T> actual;
-        final ArrayCompositeDisposable frc;
+        private static final long serialVersionUID = 1418547743690811973L;
 
-        Disposable s;
+        final Observer<? super T> downstream;
 
-        TakeUntilObserver(Observer<? super T> actual, ArrayCompositeDisposable frc) {
-            this.actual = actual;
-            this.frc = frc;
-        }
+        final AtomicReference<Disposable> upstream;
 
-        @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                if (frc.setResource(0, s)) {
-                    if (compareAndSet(false, true)) {
-                        actual.onSubscribe(this);
-                    }
-                }
-            }
-        }
+        final OtherObserver otherObserver;
 
-        @Override
-        public void onNext(T t) {
-            actual.onNext(t);
-        }
+        final AtomicThrowable error;
 
-        @Override
-        public void onError(Throwable t) {
-            frc.dispose();
-            actual.onError(t);
-        }
-
-        @Override
-        public void onComplete() {
-            frc.dispose();
-            actual.onComplete();
+        TakeUntilMainObserver(Observer<? super T> downstream) {
+            this.downstream = downstream;
+            this.upstream = new AtomicReference<Disposable>();
+            this.otherObserver = new OtherObserver();
+            this.error = new AtomicThrowable();
         }
 
         @Override
         public void dispose() {
-            frc.dispose();
+            DisposableHelper.dispose(upstream);
+            DisposableHelper.dispose(otherObserver);
         }
 
         @Override
         public boolean isDisposed() {
-            return frc.isDisposed();
+            return DisposableHelper.isDisposed(upstream.get());
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            DisposableHelper.setOnce(upstream, d);
+        }
+
+        @Override
+        public void onNext(T t) {
+            HalfSerializer.onNext(downstream, t, this, error);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            DisposableHelper.dispose(otherObserver);
+            HalfSerializer.onError(downstream, e, this, error);
+        }
+
+        @Override
+        public void onComplete() {
+            DisposableHelper.dispose(otherObserver);
+            HalfSerializer.onComplete(downstream, this, error);
+        }
+
+        void otherError(Throwable e) {
+            DisposableHelper.dispose(upstream);
+            HalfSerializer.onError(downstream, e, this, error);
+        }
+
+        void otherComplete() {
+            DisposableHelper.dispose(upstream);
+            HalfSerializer.onComplete(downstream, this, error);
+        }
+
+        final class OtherObserver extends AtomicReference<Disposable>
+        implements Observer<U> {
+
+            private static final long serialVersionUID = -8693423678067375039L;
+
+            @Override
+            public void onSubscribe(Disposable d) {
+                DisposableHelper.setOnce(this, d);
+            }
+
+            @Override
+            public void onNext(U t) {
+                DisposableHelper.dispose(this);
+                otherComplete();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                otherError(e);
+            }
+
+            @Override
+            public void onComplete() {
+                otherComplete();
+            }
+
         }
     }
+
 }

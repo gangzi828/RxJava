@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -26,8 +26,11 @@ import org.reactivestreams.*;
 
 import io.reactivex.*;
 import io.reactivex.disposables.*;
-import io.reactivex.exceptions.TestException;
+import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableUsingTest {
@@ -50,8 +53,8 @@ public class FlowableUsingTest {
     private final Consumer<Disposable> disposeSubscription = new Consumer<Disposable>() {
 
         @Override
-        public void accept(Disposable s) {
-            s.dispose();
+        public void accept(Disposable d) {
+            d.dispose();
         }
 
     };
@@ -84,16 +87,16 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), disposeEagerly);
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onNext("Hello");
-        inOrder.verify(observer, times(1)).onNext("world!");
-        inOrder.verify(observer, times(1)).onComplete();
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onNext("Hello");
+        inOrder.verify(subscriber, times(1)).onNext("world!");
+        inOrder.verify(subscriber, times(1)).onComplete();
         inOrder.verifyNoMoreInteractions();
 
         // The resouce should be closed
@@ -144,22 +147,22 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), disposeEagerly);
-        observable.subscribe(observer);
-        observable.subscribe(observer);
+        flowable.subscribe(subscriber);
+        flowable.subscribe(subscriber);
 
-        InOrder inOrder = inOrder(observer);
+        InOrder inOrder = inOrder(subscriber);
 
-        inOrder.verify(observer, times(1)).onNext("Hello");
-        inOrder.verify(observer, times(1)).onNext("world!");
-        inOrder.verify(observer, times(1)).onComplete();
+        inOrder.verify(subscriber, times(1)).onNext("Hello");
+        inOrder.verify(subscriber, times(1)).onNext("world!");
+        inOrder.verify(subscriber, times(1)).onComplete();
 
-        inOrder.verify(observer, times(1)).onNext("Hello");
-        inOrder.verify(observer, times(1)).onNext("world!");
-        inOrder.verify(observer, times(1)).onComplete();
+        inOrder.verify(subscriber, times(1)).onNext("Hello");
+        inOrder.verify(subscriber, times(1)).onNext("world!");
+        inOrder.verify(subscriber, times(1)).onComplete();
         inOrder.verifyNoMoreInteractions();
     }
 
@@ -183,7 +186,7 @@ public class FlowableUsingTest {
 
         Function<Disposable, Flowable<Integer>> observableFactory = new Function<Disposable, Flowable<Integer>>() {
             @Override
-            public Flowable<Integer> apply(Disposable s) {
+            public Flowable<Integer> apply(Disposable d) {
                 return Flowable.empty();
             }
         };
@@ -193,16 +196,16 @@ public class FlowableUsingTest {
     }
 
     @Test
-    public void testUsingWithObservableFactoryError() {
-        performTestUsingWithObservableFactoryError(false);
+    public void testUsingWithFlowableFactoryError() {
+        performTestUsingWithFlowableFactoryError(false);
     }
 
     @Test
-    public void testUsingWithObservableFactoryErrorDisposeEagerly() {
-        performTestUsingWithObservableFactoryError(true);
+    public void testUsingWithFlowableFactoryErrorDisposeEagerly() {
+        performTestUsingWithFlowableFactoryError(true);
     }
 
-    private void performTestUsingWithObservableFactoryError(boolean disposeEagerly) {
+    private void performTestUsingWithFlowableFactoryError(boolean disposeEagerly) {
         final Runnable unsubscribe = mock(Runnable.class);
         Callable<Disposable> resourceFactory = new Callable<Disposable>() {
             @Override
@@ -230,17 +233,17 @@ public class FlowableUsingTest {
 
     @Test
     @Ignore("subscribe() can't throw")
-    public void testUsingWithObservableFactoryErrorInOnSubscribe() {
-        performTestUsingWithObservableFactoryErrorInOnSubscribe(false);
+    public void testUsingWithFlowableFactoryErrorInOnSubscribe() {
+        performTestUsingWithFlowableFactoryErrorInOnSubscribe(false);
     }
 
     @Test
     @Ignore("subscribe() can't throw")
-    public void testUsingWithObservableFactoryErrorInOnSubscribeDisposeEagerly() {
-        performTestUsingWithObservableFactoryErrorInOnSubscribe(true);
+    public void testUsingWithFlowableFactoryErrorInOnSubscribeDisposeEagerly() {
+        performTestUsingWithFlowableFactoryErrorInOnSubscribe(true);
     }
 
-    private void performTestUsingWithObservableFactoryErrorInOnSubscribe(boolean disposeEagerly) {
+    private void performTestUsingWithFlowableFactoryErrorInOnSubscribe(boolean disposeEagerly) {
         final Runnable unsubscribe = mock(Runnable.class);
         Callable<Disposable> resourceFactory = new Callable<Disposable>() {
             @Override
@@ -288,14 +291,14 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), true)
         .doOnCancel(unsub)
         .doOnComplete(completion);
 
-        observable.safeSubscribe(observer);
+        flowable.safeSubscribe(subscriber);
 
         assertEquals(Arrays.asList("disposed", "completed"), events);
 
@@ -315,20 +318,18 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), false)
         .doOnCancel(unsub)
         .doOnComplete(completion);
 
-        observable.safeSubscribe(observer);
+        flowable.safeSubscribe(subscriber);
 
         assertEquals(Arrays.asList("completed", "disposed"), events);
 
     }
-
-
 
     @Test
     public void testUsingDisposesEagerlyBeforeError() {
@@ -345,14 +346,14 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), true)
         .doOnCancel(unsub)
         .doOnError(onError);
 
-        observable.safeSubscribe(observer);
+        flowable.safeSubscribe(subscriber);
 
         assertEquals(Arrays.asList("disposed", "error"), events);
 
@@ -373,14 +374,14 @@ public class FlowableUsingTest {
             }
         };
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        Flowable<String> observable = Flowable.using(resourceFactory, observableFactory,
+        Flowable<String> flowable = Flowable.using(resourceFactory, observableFactory,
                 new DisposeAction(), false)
         .doOnCancel(unsub)
         .doOnError(onError);
 
-        observable.safeSubscribe(observer);
+        flowable.safeSubscribe(subscriber);
 
         assertEquals(Arrays.asList("error", "disposed"), events);
     }
@@ -500,5 +501,180 @@ public class FlowableUsingTest {
         ts.assertComplete();
 
         Assert.assertEquals(1, count.get());
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.using(
+                new Callable<Object>() {
+                    @Override
+                    public Object call() throws Exception {
+                        return 1;
+                    }
+                },
+                new Function<Object, Flowable<Object>>() {
+                    @Override
+                    public Flowable<Object> apply(Object v) throws Exception {
+                        return Flowable.never();
+                    }
+                },
+                Functions.emptyConsumer()
+        ));
+    }
+
+    @Test
+    public void supplierDisposerCrash() {
+        TestSubscriber<Object> ts = Flowable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Object v) throws Exception {
+                throw new TestException("First");
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailure(CompositeException.class);
+
+        List<Throwable> errors = TestHelper.compositeList(ts.errors().get(0));
+
+        TestHelper.assertError(errors, 0, TestException.class, "First");
+        TestHelper.assertError(errors, 1, TestException.class, "Second");
+    }
+
+    @Test
+    public void eagerOnErrorDisposerCrash() {
+        TestSubscriber<Object> ts = Flowable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Object v) throws Exception {
+                return Flowable.error(new TestException("First"));
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailure(CompositeException.class);
+
+        List<Throwable> errors = TestHelper.compositeList(ts.errors().get(0));
+
+        TestHelper.assertError(errors, 0, TestException.class, "First");
+        TestHelper.assertError(errors, 1, TestException.class, "Second");
+    }
+
+    @Test
+    public void eagerOnCompleteDisposerCrash() {
+        Flowable.using(new Callable<Object>() {
+            @Override
+            public Object call() throws Exception {
+                return 1;
+            }
+        }, new Function<Object, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Object v) throws Exception {
+                return Flowable.empty();
+            }
+        }, new Consumer<Object>() {
+            @Override
+            public void accept(Object e) throws Exception {
+                throw new TestException("Second");
+            }
+        })
+        .test()
+        .assertFailureAndMessage(TestException.class, "Second");
+    }
+
+    @Test
+    public void nonEagerDisposerCrash() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Flowable.using(new Callable<Object>() {
+                @Override
+                public Object call() throws Exception {
+                    return 1;
+                }
+            }, new Function<Object, Flowable<Object>>() {
+                @Override
+                public Flowable<Object> apply(Object v) throws Exception {
+                    return Flowable.empty();
+                }
+            }, new Consumer<Object>() {
+                @Override
+                public void accept(Object e) throws Exception {
+                    throw new TestException("Second");
+                }
+            }, false)
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void sourceSupplierReturnsNull() {
+        Flowable.using(Functions.justCallable(1),
+                Functions.justFunction((Publisher<Object>)null),
+                Functions.emptyConsumer())
+        .test()
+        .assertFailureAndMessage(NullPointerException.class, "The sourceSupplier returned a null Publisher")
+        ;
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f)
+                    throws Exception {
+                return Flowable.using(Functions.justCallable(1), Functions.justFunction(f), Functions.emptyConsumer());
+            }
+        });
+    }
+
+    @Test
+    public void eagerDisposedOnComplete() {
+        final TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+
+        Flowable.using(Functions.justCallable(1), Functions.justFunction(new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
+                ts.cancel();
+                subscriber.onComplete();
+            }
+        }), Functions.emptyConsumer(), true)
+        .subscribe(ts);
+    }
+
+    @Test
+    public void eagerDisposedOnError() {
+        final TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
+
+        Flowable.using(Functions.justCallable(1), Functions.justFunction(new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
+                ts.cancel();
+                subscriber.onError(new TestException());
+            }
+        }), Functions.emptyConsumer(), true)
+        .subscribe(ts);
     }
 }

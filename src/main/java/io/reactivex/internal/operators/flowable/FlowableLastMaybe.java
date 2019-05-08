@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -39,35 +39,35 @@ public final class FlowableLastMaybe<T> extends Maybe<T> {
         source.subscribe(new LastSubscriber<T>(observer));
     }
 
-    static final class LastSubscriber<T> implements Subscriber<T>, Disposable {
+    static final class LastSubscriber<T> implements FlowableSubscriber<T>, Disposable {
 
-        final MaybeObserver<? super T> actual;
+        final MaybeObserver<? super T> downstream;
 
-        Subscription s;
+        Subscription upstream;
 
         T item;
 
-        LastSubscriber(MaybeObserver<? super T> actual) {
-            this.actual = actual;
+        LastSubscriber(MaybeObserver<? super T> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void dispose() {
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public boolean isDisposed() {
-            return s == SubscriptionHelper.CANCELLED;
+            return upstream == SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(Long.MAX_VALUE);
             }
@@ -80,20 +80,20 @@ public final class FlowableLastMaybe<T> extends Maybe<T> {
 
         @Override
         public void onError(Throwable t) {
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
             item = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
             T v = item;
             if (v != null) {
                 item = null;
-                actual.onSuccess(v);
+                downstream.onSuccess(v);
             } else {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
     }

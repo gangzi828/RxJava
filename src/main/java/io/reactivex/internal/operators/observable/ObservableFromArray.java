@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.observable;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.observers.BasicQueueDisposable;
 
@@ -22,11 +23,12 @@ public final class ObservableFromArray<T> extends Observable<T> {
     public ObservableFromArray(T[] array) {
         this.array = array;
     }
-    @Override
-    public void subscribeActual(Observer<? super T> s) {
-        FromArrayDisposable<T> d = new FromArrayDisposable<T>(s, array);
 
-        s.onSubscribe(d);
+    @Override
+    public void subscribeActual(Observer<? super T> observer) {
+        FromArrayDisposable<T> d = new FromArrayDisposable<T>(observer, array);
+
+        observer.onSubscribe(d);
 
         if (d.fusionMode) {
             return;
@@ -37,7 +39,7 @@ public final class ObservableFromArray<T> extends Observable<T> {
 
     static final class FromArrayDisposable<T> extends BasicQueueDisposable<T> {
 
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
 
         final T[] array;
 
@@ -48,7 +50,7 @@ public final class ObservableFromArray<T> extends Observable<T> {
         volatile boolean disposed;
 
         FromArrayDisposable(Observer<? super T> actual, T[] array) {
-            this.actual = actual;
+            this.downstream = actual;
             this.array = array;
         }
 
@@ -61,6 +63,7 @@ public final class ObservableFromArray<T> extends Observable<T> {
             return NONE;
         }
 
+        @Nullable
         @Override
         public T poll() {
             int i = index;
@@ -99,13 +102,13 @@ public final class ObservableFromArray<T> extends Observable<T> {
             for (int i = 0; i < n && !isDisposed(); i++) {
                 T value = a[i];
                 if (value == null) {
-                    actual.onError(new NullPointerException("The " + i + "th element is null"));
+                    downstream.onError(new NullPointerException("The element at index " + i + " is null"));
                     return;
                 }
-                actual.onNext(value);
+                downstream.onNext(value);
             }
             if (!isDisposed()) {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
     }

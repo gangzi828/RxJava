@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.Iterator;
 
 import io.reactivex.*;
@@ -40,15 +41,10 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
         Iterator<U> it;
 
         try {
-            it = other.iterator();
+            it = ObjectHelper.requireNonNull(other.iterator(), "The iterator returned by other is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             EmptyDisposable.error(e, t);
-            return;
-        }
-
-        if (it == null) {
-            EmptyDisposable.error(new NullPointerException("The iterator returned by other is null"), t);
             return;
         }
 
@@ -71,40 +67,38 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
     }
 
     static final class ZipIterableObserver<T, U, V> implements Observer<T>, Disposable {
-        final Observer<? super V> actual;
+        final Observer<? super V> downstream;
         final Iterator<U> iterator;
         final BiFunction<? super T, ? super U, ? extends V> zipper;
 
-        Disposable s;
+        Disposable upstream;
 
         boolean done;
 
         ZipIterableObserver(Observer<? super V> actual, Iterator<U> iterator,
                 BiFunction<? super T, ? super U, ? extends V> zipper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.iterator = iterator;
             this.zipper = zipper;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -115,33 +109,23 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
             U u;
 
             try {
-                u = iterator.next();
+                u = ObjectHelper.requireNonNull(iterator.next(), "The iterator returned a null value");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 error(e);
                 return;
             }
 
-            if (u == null) {
-                error(new NullPointerException("The iterator returned a null value"));
-                return;
-            }
-
             V v;
             try {
-                v = zipper.apply(t, u);
+                v = ObjectHelper.requireNonNull(zipper.apply(t, u), "The zipper function returned a null value");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                error(new NullPointerException("The iterator returned a null value"));
+                error(e);
                 return;
             }
 
-            if (v == null) {
-                error(new NullPointerException("The zipper function returned a null value"));
-                return;
-            }
-
-            actual.onNext(v);
+            downstream.onNext(v);
 
             boolean b;
 
@@ -155,15 +139,15 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
 
             if (!b) {
                 done = true;
-                s.dispose();
-                actual.onComplete();
+                upstream.dispose();
+                downstream.onComplete();
             }
         }
 
         void error(Throwable e) {
             done = true;
-            s.dispose();
-            actual.onError(e);
+            upstream.dispose();
+            downstream.onError(e);
         }
 
         @Override
@@ -173,7 +157,7 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -182,7 +166,7 @@ public final class ObservableZipIterable<T, U, V> extends Observable<V> {
                 return;
             }
             done = true;
-            actual.onComplete();
+            downstream.onComplete();
         }
 
     }

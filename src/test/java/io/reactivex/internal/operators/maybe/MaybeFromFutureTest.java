@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,12 +13,17 @@
 
 package io.reactivex.internal.operators.maybe;
 
+import static org.junit.Assert.assertTrue;
+
 import java.util.concurrent.*;
 
 import org.junit.Test;
 
 import io.reactivex.Maybe;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.internal.functions.Functions;
+import io.reactivex.observers.TestObserver;
+import io.reactivex.schedulers.Schedulers;
 
 public class MaybeFromFutureTest {
 
@@ -57,5 +62,61 @@ public class MaybeFromFutureTest {
 
         Maybe.fromFuture(ft, 1, TimeUnit.MILLISECONDS).test()
         .assertFailure(InterruptedException.class);
+    }
+
+    @Test
+    public void cancelWhileRunning() {
+        final TestObserver<Object> to = new TestObserver<Object>();
+
+        FutureTask<Object> ft = new FutureTask<Object>(new Runnable() {
+            @Override
+            public void run() {
+                to.cancel();
+            }
+        }, null);
+
+        Schedulers.single().scheduleDirect(ft, 100, TimeUnit.MILLISECONDS);
+
+        Maybe.fromFuture(ft)
+        .subscribeWith(to)
+        .assertEmpty();
+
+        assertTrue(to.isDisposed());
+    }
+
+    @Test
+    public void cancelAndCrashWhileRunning() {
+        final TestObserver<Object> to = new TestObserver<Object>();
+
+        FutureTask<Object> ft = new FutureTask<Object>(new Runnable() {
+            @Override
+            public void run() {
+                to.cancel();
+                throw new TestException();
+            }
+        }, null);
+
+        Schedulers.single().scheduleDirect(ft, 100, TimeUnit.MILLISECONDS);
+
+        Maybe.fromFuture(ft)
+        .subscribeWith(to)
+        .assertEmpty();
+
+        assertTrue(to.isDisposed());
+    }
+
+    @Test
+    public void futureNull() {
+        FutureTask<Object> ft = new FutureTask<Object>(new Runnable() {
+            @Override
+            public void run() {
+            }
+        }, null);
+
+        Schedulers.single().scheduleDirect(ft, 100, TimeUnit.MILLISECONDS);
+
+        Maybe.fromFuture(ft)
+        .test()
+        .assertResult();
     }
 }

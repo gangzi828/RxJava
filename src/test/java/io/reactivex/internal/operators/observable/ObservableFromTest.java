@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,7 +20,9 @@ import java.util.concurrent.*;
 import org.junit.Test;
 
 import io.reactivex.*;
-import io.reactivex.internal.fuseable.ScalarCallable;
+import io.reactivex.functions.Function;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.observers.*;
 import io.reactivex.schedulers.Schedulers;
 
 public class ObservableFromTest {
@@ -56,5 +58,31 @@ public class ObservableFromTest {
     @Test
     public void fromArraySingle() {
         assertTrue(Observable.fromArray(1) instanceof ScalarCallable);
+    }
+
+    @Test
+    public void fromPublisherDispose() {
+        TestHelper.checkDisposed(Flowable.just(1).toObservable());
+    }
+
+    @Test
+    public void fromPublisherDoubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowableToObservable(new Function<Flowable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Flowable<Object> f) throws Exception {
+                return f.toObservable();
+            }
+        });
+    }
+
+    @Test
+    public void fusionRejected() {
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ASYNC);
+
+        Observable.fromArray(1, 2, 3)
+        .subscribe(to);
+
+        ObserverFusion.assertFusion(to, QueueFuseable.NONE)
+        .assertResult(1, 2, 3);
     }
 }

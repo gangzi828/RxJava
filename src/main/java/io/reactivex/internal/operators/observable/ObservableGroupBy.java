@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.*;
@@ -51,7 +52,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
 
         private static final long serialVersionUID = -3688291656102519502L;
 
-        final Observer<? super GroupedObservable<K, V>> actual;
+        final Observer<? super GroupedObservable<K, V>> downstream;
         final Function<? super T, ? extends K> keySelector;
         final Function<? super T, ? extends V> valueSelector;
         final int bufferSize;
@@ -60,12 +61,12 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
 
         static final Object NULL_KEY = new Object();
 
-        Disposable s;
+        Disposable upstream;
 
         final AtomicBoolean cancelled = new AtomicBoolean();
 
         public GroupByObserver(Observer<? super GroupedObservable<K, V>> actual, Function<? super T, ? extends K> keySelector, Function<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError) {
-            this.actual = actual;
+            this.downstream = actual;
             this.keySelector = keySelector;
             this.valueSelector = valueSelector;
             this.bufferSize = bufferSize;
@@ -75,10 +76,10 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
@@ -89,7 +90,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
                 key = keySelector.apply(t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.dispose();
+                upstream.dispose();
                 onError(e);
                 return;
             }
@@ -108,22 +109,16 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
 
                 getAndIncrement();
 
-                actual.onNext(group);
+                downstream.onNext(group);
             }
 
             V v;
             try {
-                v = valueSelector.apply(t);
+                v = ObjectHelper.requireNonNull(valueSelector.apply(t), "The value supplied is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.dispose();
+                upstream.dispose();
                 onError(e);
-                return;
-            }
-
-            if (v == null) {
-                s.dispose();
-                onError(new NullPointerException("The value supplied is null"));
                 return;
             }
 
@@ -139,7 +134,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
                 e.onError(t);
             }
 
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -151,7 +146,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
                 e.onComplete();
             }
 
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
@@ -160,7 +155,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
             // but running groups still require new values
             if (cancelled.compareAndSet(false, true)) {
                 if (decrementAndGet() == 0) {
-                    s.dispose();
+                    upstream.dispose();
                 }
             }
         }
@@ -174,7 +169,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
             Object mapKey = key != null ? key : NULL_KEY;
             groups.remove(mapKey);
             if (decrementAndGet() == 0) {
-                s.dispose();
+                upstream.dispose();
             }
         }
     }
@@ -225,6 +220,8 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
 
         final AtomicBoolean cancelled = new AtomicBoolean();
 
+        final AtomicBoolean once = new AtomicBoolean();
+
         final AtomicReference<Observer<? super T>> actual = new AtomicReference<Observer<? super T>>();
 
         State(int bufferSize, GroupByObserver<?, K, T> parent, K key, boolean delayError) {
@@ -238,6 +235,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
         public void dispose() {
             if (cancelled.compareAndSet(false, true)) {
                 if (getAndIncrement() == 0) {
+                    actual.lazySet(null);
                     parent.cancel(key);
                 }
             }
@@ -249,22 +247,22 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
         }
 
         @Override
-        public void subscribe(Observer<? super T> s) {
-            if (actual.compareAndSet(null, s)) {
-                s.onSubscribe(this);
-                drain();
+        public void subscribe(Observer<? super T> observer) {
+            if (once.compareAndSet(false, true)) {
+                observer.onSubscribe(this);
+                actual.lazySet(observer);
+                if (cancelled.get()) {
+                    actual.lazySet(null);
+                } else {
+                    drain();
+                }
             } else {
-                EmptyDisposable.error(new IllegalStateException("Only one Observer allowed!"), s);
+                EmptyDisposable.error(new IllegalStateException("Only one Observer allowed!"), observer);
             }
         }
 
         public void onNext(T t) {
-            if (t == null) {
-                error = new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources.");
-                done = true;
-            } else {
-                queue.offer(t);
-            }
+            queue.offer(t);
             drain();
         }
 
@@ -290,10 +288,6 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
             Observer<? super T> a = actual.get();
             for (;;) {
                 if (a != null) {
-                    if (checkTerminated(done, q.isEmpty(), a, delayError)) {
-                        return;
-                    }
-
                     for (;;) {
                         boolean d = done;
                         T v = q.poll();
@@ -325,6 +319,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
             if (cancelled.get()) {
                 queue.clear();
                 parent.cancel(key);
+                actual.lazySet(null);
                 return true;
             }
 
@@ -332,6 +327,7 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
                 if (delayError) {
                     if (empty) {
                         Throwable e = error;
+                        actual.lazySet(null);
                         if (e != null) {
                             a.onError(e);
                         } else {
@@ -343,10 +339,12 @@ public final class ObservableGroupBy<T, K, V> extends AbstractObservableWithUpst
                     Throwable e = error;
                     if (e != null) {
                         queue.clear();
+                        actual.lazySet(null);
                         a.onError(e);
                         return true;
                     } else
                     if (empty) {
+                        actual.lazySet(null);
                         a.onComplete();
                         return true;
                     }

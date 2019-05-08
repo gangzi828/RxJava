@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,13 +18,17 @@ import static org.junit.Assert.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-import org.junit.Test;
+import org.junit.*;
 
 import io.reactivex.*;
 import io.reactivex.Observable;
+import io.reactivex.Observer;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.Function;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.PublishSubject;
 
@@ -171,7 +175,7 @@ public class ObservableFlatMapSingleTest {
 
     @Test
     public void middleError() {
-        Observable.fromArray(new String[]{"1","a","2"}).flatMapSingle(new Function<String, SingleSource<Integer>>() {
+        Observable.fromArray(new String[]{"1", "a", "2"}).flatMapSingle(new Function<String, SingleSource<Integer>>() {
             @Override
             public SingleSource<Integer> apply(final String s) throws NumberFormatException {
                 //return Single.just(Integer.valueOf(s)); //This works
@@ -185,5 +189,182 @@ public class ObservableFlatMapSingleTest {
         })
         .test()
         .assertFailure(NumberFormatException.class, 1);
+    }
+
+    @Test
+    public void asyncFlatten() {
+        Observable.range(1, 1000)
+        .flatMapSingle(new Function<Integer, SingleSource<Integer>>() {
+            @Override
+            public SingleSource<Integer> apply(Integer v) throws Exception {
+                return Single.just(1).subscribeOn(Schedulers.computation());
+            }
+        })
+        .take(500)
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertSubscribed()
+        .assertValueCount(500)
+        .assertNoErrors()
+        .assertComplete();
+    }
+
+    @Test
+    public void successError() {
+        final PublishSubject<Integer> ps = PublishSubject.create();
+
+        TestObserver<Integer> to = Observable.range(1, 2)
+        .flatMapSingle(new Function<Integer, SingleSource<Integer>>() {
+            @Override
+            public SingleSource<Integer> apply(Integer v) throws Exception {
+                if (v == 2) {
+                    return ps.singleOrError();
+                }
+                return Single.error(new TestException());
+            }
+        }, true)
+        .test();
+
+        ps.onNext(1);
+        ps.onComplete();
+
+        to
+        .assertFailure(TestException.class, 1);
+    }
+
+    @Test
+    public void disposed() {
+        TestHelper.checkDisposed(PublishSubject.<Integer>create().flatMapSingle(new Function<Integer, SingleSource<Integer>>() {
+            @Override
+            public SingleSource<Integer> apply(Integer v) throws Exception {
+                return Single.<Integer>just(1);
+            }
+        }));
+    }
+
+    @Test
+    public void innerSuccessCompletesAfterMain() {
+        PublishSubject<Integer> ps = PublishSubject.create();
+
+        TestObserver<Integer> to = Observable.just(1).flatMapSingle(Functions.justFunction(ps.singleOrError()))
+        .test();
+
+        ps.onNext(2);
+        ps.onComplete();
+
+        to
+        .assertResult(2);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Integer>>() {
+            @Override
+            public ObservableSource<Integer> apply(Observable<Object> f) throws Exception {
+                return f.flatMapSingle(Functions.justFunction(Single.just(2)));
+            }
+        });
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onError(new TestException("First"));
+                    observer.onError(new TestException("Second"));
+                }
+            }
+            .flatMapSingle(Functions.justFunction(Single.just(2)))
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void badInnerSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Observable.just(1)
+            .flatMapSingle(Functions.justFunction(new Single<Integer>() {
+                @Override
+                protected void subscribeActual(SingleObserver<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onError(new TestException("First"));
+                    observer.onError(new TestException("Second"));
+                }
+            }))
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void emissionQueueTrigger() {
+        final PublishSubject<Integer> ps1 = PublishSubject.create();
+        final PublishSubject<Integer> ps2 = PublishSubject.create();
+
+        TestObserver<Integer> to = new TestObserver<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    ps2.onNext(2);
+                    ps2.onComplete();
+                }
+            }
+        };
+
+        Observable.just(ps1, ps2)
+                .flatMapSingle(new Function<PublishSubject<Integer>, SingleSource<Integer>>() {
+                    @Override
+                    public SingleSource<Integer> apply(PublishSubject<Integer> v) throws Exception {
+                        return v.singleOrError();
+                    }
+                })
+        .subscribe(to);
+
+        ps1.onNext(1);
+        ps1.onComplete();
+
+        to.assertResult(1, 2);
+    }
+
+    @Test
+    public void disposeInner() {
+        final TestObserver<Object> to = new TestObserver<Object>();
+
+        Observable.just(1).flatMapSingle(new Function<Integer, SingleSource<Object>>() {
+            @Override
+            public SingleSource<Object> apply(Integer v) throws Exception {
+                return new Single<Object>() {
+                    @Override
+                    protected void subscribeActual(SingleObserver<? super Object> observer) {
+                        observer.onSubscribe(Disposables.empty());
+
+                        assertFalse(((Disposable)observer).isDisposed());
+
+                        to.dispose();
+
+                        assertTrue(((Disposable)observer).isDisposed());
+                    }
+                };
+            }
+        })
+        .subscribe(to);
+
+        to
+        .assertEmpty();
     }
 }

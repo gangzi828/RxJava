@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,9 +14,10 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.util.Arrays;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
@@ -28,6 +29,7 @@ import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.PublishProcessor;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
@@ -39,13 +41,14 @@ public class FlowableTakeTest {
         Flowable<String> w = Flowable.fromIterable(Arrays.asList("one", "two", "three"));
         Flowable<String> take = w.take(2);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, times(1)).onNext("one");
-        verify(observer, times(1)).onNext("two");
-        verify(observer, never()).onNext("three");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, times(1)).onNext("one");
+        verify(subscriber, times(1)).onNext("two");
+        verify(subscriber, never()).onNext("three");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
@@ -53,13 +56,14 @@ public class FlowableTakeTest {
         Flowable<String> w = Flowable.fromIterable(Arrays.asList("one", "two", "three"));
         Flowable<String> take = w.take(1);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, times(1)).onNext("one");
-        verify(observer, never()).onNext("two");
-        verify(observer, never()).onNext("three");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, times(1)).onNext("one");
+        verify(subscriber, never()).onNext("two");
+        verify(subscriber, never()).onNext("three");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -83,10 +87,11 @@ public class FlowableTakeTest {
             }
         });
 
-        Subscriber<Integer> observer = TestHelper.mockSubscriber();
-        w.subscribe(observer);
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onError(any(IllegalArgumentException.class));
+        Subscriber<Integer> subscriber = TestHelper.mockSubscriber();
+        w.subscribe(subscriber);
+
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onError(any(IllegalArgumentException.class));
         inOrder.verifyNoMoreInteractions();
     }
 
@@ -99,34 +104,42 @@ public class FlowableTakeTest {
             }
         });
 
-        Subscriber<Integer> observer = TestHelper.mockSubscriber();
-        w.subscribe(observer);
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer, times(1)).onError(any(IllegalArgumentException.class));
+        Subscriber<Integer> subscriber = TestHelper.mockSubscriber();
+        w.subscribe(subscriber);
+
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber, times(1)).onError(any(IllegalArgumentException.class));
         inOrder.verifyNoMoreInteractions();
     }
 
     @Test
     public void testTakeDoesntLeakErrors() {
-        Flowable<String> source = Flowable.unsafeCreate(new Publisher<String>() {
-            @Override
-            public void subscribe(Subscriber<? super String> observer) {
-                observer.onSubscribe(new BooleanSubscription());
-                observer.onNext("one");
-                observer.onError(new Throwable("test failed"));
-            }
-        });
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Flowable<String> source = Flowable.unsafeCreate(new Publisher<String>() {
+                @Override
+                public void subscribe(Subscriber<? super String> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+                    subscriber.onNext("one");
+                    subscriber.onError(new Throwable("test failed"));
+                }
+            });
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+            Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        source.take(1).subscribe(observer);
+            source.take(1).subscribe(subscriber);
 
-        verify(observer).onSubscribe((Subscription)notNull());
-        verify(observer, times(1)).onNext("one");
-        // even though onError is called we take(1) so shouldn't see it
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
-        verifyNoMoreInteractions(observer);
+            verify(subscriber).onSubscribe((Subscription)notNull());
+            verify(subscriber, times(1)).onNext("one");
+            // even though onError is called we take(1) so shouldn't see it
+            verify(subscriber, never()).onError(any(Throwable.class));
+            verify(subscriber, times(1)).onComplete();
+            verifyNoMoreInteractions(subscriber);
+
+            TestHelper.assertUndeliverable(errors, 0, Throwable.class, "test failed");
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 
     @Test
@@ -136,37 +149,38 @@ public class FlowableTakeTest {
         final BooleanSubscription bs = new BooleanSubscription();
         Flowable<String> source = Flowable.unsafeCreate(new Publisher<String>() {
             @Override
-            public void subscribe(Subscriber<? super String> observer) {
+            public void subscribe(Subscriber<? super String> subscriber) {
                 subscribed.set(true);
-                observer.onSubscribe(bs);
-                observer.onError(new Throwable("test failed"));
+                subscriber.onSubscribe(bs);
+                subscriber.onError(new Throwable("test failed"));
             }
         });
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
-        source.take(0).subscribe(observer);
+        source.take(0).subscribe(subscriber);
+
         assertTrue("source subscribed", subscribed.get());
         assertTrue("source unsubscribed", bs.isCancelled());
 
-        verify(observer, never()).onNext(anyString());
+        verify(subscriber, never()).onNext(anyString());
         // even though onError is called we take(0) so shouldn't see it
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
-        verifyNoMoreInteractions(observer);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
+        verifyNoMoreInteractions(subscriber);
     }
 
     @Test
     public void testUnsubscribeAfterTake() {
-        TestObservableFunc f = new TestObservableFunc("one", "two", "three");
+        TestFlowableFunc f = new TestFlowableFunc("one", "two", "three");
         Flowable<String> w = Flowable.unsafeCreate(f);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
 
         Flowable<String> take = w.take(1);
-        take.subscribe(observer);
+        take.subscribe(subscriber);
 
-        // wait for the Observable to complete
+        // wait for the Flowable to complete
         try {
             f.t.join();
         } catch (Throwable e) {
@@ -174,19 +188,19 @@ public class FlowableTakeTest {
             fail(e.getMessage());
         }
 
-        System.out.println("TestObservable thread finished");
-        verify(observer).onSubscribe((Subscription)notNull());
-        verify(observer, times(1)).onNext("one");
-        verify(observer, never()).onNext("two");
-        verify(observer, never()).onNext("three");
-        verify(observer, times(1)).onComplete();
+        System.out.println("TestFlowable thread finished");
+        verify(subscriber).onSubscribe((Subscription)notNull());
+        verify(subscriber, times(1)).onNext("one");
+        verify(subscriber, never()).onNext("two");
+        verify(subscriber, never()).onNext("three");
+        verify(subscriber, times(1)).onComplete();
         // FIXME no longer assertable
 //        verify(s, times(1)).unsubscribe();
-        verifyNoMoreInteractions(observer);
+        verifyNoMoreInteractions(subscriber);
     }
 
     @Test(timeout = 2000)
-    public void testUnsubscribeFromSynchronousInfiniteObservable() {
+    public void testUnsubscribeFromSynchronousInfiniteFlowable() {
         final AtomicLong count = new AtomicLong();
         INFINITE_OBSERVABLE.take(10).subscribe(new Consumer<Long>() {
 
@@ -228,39 +242,39 @@ public class FlowableTakeTest {
         assertEquals(1, count.get());
     }
 
-    static class TestObservableFunc implements Publisher<String> {
+    static class TestFlowableFunc implements Publisher<String> {
 
         final String[] values;
         Thread t;
 
-        TestObservableFunc(String... values) {
+        TestFlowableFunc(String... values) {
             this.values = values;
         }
 
         @Override
-        public void subscribe(final Subscriber<? super String> observer) {
-            observer.onSubscribe(new BooleanSubscription());
-            System.out.println("TestObservable subscribed to ...");
+        public void subscribe(final Subscriber<? super String> subscriber) {
+            subscriber.onSubscribe(new BooleanSubscription());
+            System.out.println("TestFlowable subscribed to ...");
             t = new Thread(new Runnable() {
 
                 @Override
                 public void run() {
                     try {
-                        System.out.println("running TestObservable thread");
+                        System.out.println("running TestFlowable thread");
                         for (String s : values) {
-                            System.out.println("TestObservable onNext: " + s);
-                            observer.onNext(s);
+                            System.out.println("TestFlowable onNext: " + s);
+                            subscriber.onNext(s);
                         }
-                        observer.onComplete();
+                        subscriber.onComplete();
                     } catch (Throwable e) {
                         throw new RuntimeException(e);
                     }
                 }
 
             });
-            System.out.println("starting TestObservable thread");
+            System.out.println("starting TestFlowable thread");
             t.start();
-            System.out.println("done starting TestObservable thread");
+            System.out.println("done starting TestFlowable thread");
         }
     }
 
@@ -281,18 +295,18 @@ public class FlowableTakeTest {
 
     @Test(timeout = 2000)
     public void testTakeObserveOn() {
-        Subscriber<Object> o = TestHelper.mockSubscriber();
-        TestSubscriber<Object> ts = new TestSubscriber<Object>(o);
+        Subscriber<Object> subscriber = TestHelper.mockSubscriber();
+        TestSubscriber<Object> ts = new TestSubscriber<Object>(subscriber);
 
         INFINITE_OBSERVABLE.onBackpressureDrop()
         .observeOn(Schedulers.newThread()).take(1).subscribe(ts);
         ts.awaitTerminalEvent();
         ts.assertNoErrors();
 
-        verify(o).onNext(1L);
-        verify(o, never()).onNext(2L);
-        verify(o).onComplete();
-        verify(o, never()).onError(any(Throwable.class));
+        verify(subscriber).onNext(1L);
+        verify(subscriber, never()).onNext(2L);
+        verify(subscriber).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test
@@ -437,7 +451,6 @@ public class FlowableTakeTest {
         ts.assertComplete();
     }
 
-
     @Test
     public void takeNegative() {
         try {
@@ -448,4 +461,65 @@ public class FlowableTakeTest {
         }
     }
 
+    @Test
+    public void takeZero() {
+        Flowable.just(1)
+        .take(0)
+        .test()
+        .assertResult();
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishProcessor.create().take(2));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.take(2);
+            }
+        });
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.never().take(1));
+    }
+
+    @Test
+    public void requestRace() {
+        for (int i = 0; i < TestHelper.RACE_LONG_LOOPS; i++) {
+
+            final TestSubscriber<Integer> ts = Flowable.range(1, 2).take(2).test(0L);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ts.request(1);
+                }
+            };
+
+            TestHelper.race(r1, r1);
+
+            ts.assertResult(1, 2);
+        }
+    }
+
+    @Test
+    public void errorAfterLimitReached() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            Flowable.error(new TestException())
+            .take(0)
+            .test()
+            .assertResult();
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
 }

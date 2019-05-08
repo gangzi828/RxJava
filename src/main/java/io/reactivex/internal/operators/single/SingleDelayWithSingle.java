@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,42 +32,41 @@ public final class SingleDelayWithSingle<T, U> extends Single<T> {
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super T> subscriber) {
-        other.subscribe(new OtherObserver<T, U>(subscriber, source));
+    protected void subscribeActual(SingleObserver<? super T> observer) {
+        other.subscribe(new OtherObserver<T, U>(observer, source));
     }
 
     static final class OtherObserver<T, U>
     extends AtomicReference<Disposable>
     implements SingleObserver<U>, Disposable {
 
-
         private static final long serialVersionUID = -8565274649390031272L;
 
-        final SingleObserver<? super T> actual;
+        final SingleObserver<? super T> downstream;
 
         final SingleSource<T> source;
 
         OtherObserver(SingleObserver<? super T> actual, SingleSource<T> source) {
-            this.actual = actual;
+            this.downstream = actual;
             this.source = source;
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.set(this, d)) {
+            if (DisposableHelper.setOnce(this, d)) {
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onSuccess(U value) {
-            source.subscribe(new ResumeSingleObserver<T>(this, actual));
+            source.subscribe(new ResumeSingleObserver<T>(this, downstream));
         }
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.completable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.concurrent.Callable;
 
 import io.reactivex.*;
@@ -28,20 +29,17 @@ public final class CompletableErrorSupplier extends Completable {
     }
 
     @Override
-    protected void subscribeActual(CompletableObserver s) {
+    protected void subscribeActual(CompletableObserver observer) {
         Throwable error;
 
         try {
-            error = errorSupplier.call();
+            error = ObjectHelper.requireNonNull(errorSupplier.call(), "The error returned is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             error = e;
         }
 
-        if (error == null) {
-            error = new NullPointerException("The error supplied is null");
-        }
-        EmptyDisposable.error(error, s);
+        EmptyDisposable.error(error, observer);
     }
 
 }

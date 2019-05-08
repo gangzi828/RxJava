@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 /**
- * Callback types and a central plugin handler class to hook into the lifecycle
- * of the base reactive types and schedulers.
+ * Contains the central plugin handler {@link io.reactivex.plugins.RxJavaPlugins}
+ * class to hook into the lifecycle of the base reactive types and schedulers.
  */
 package io.reactivex.plugins;

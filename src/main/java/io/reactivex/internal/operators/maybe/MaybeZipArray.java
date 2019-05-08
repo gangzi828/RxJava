@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -39,14 +39,8 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
         MaybeSource<? extends T>[] sources = this.sources;
         int n = sources.length;
 
-
         if (n == 1) {
-            sources[0].subscribe(new MaybeMap.MapMaybeObserver<T, R>(observer, new Function<T, R>() {
-                @Override
-                public R apply(T t) throws Exception {
-                    return zipper.apply(new Object[] { t });
-                }
-            }));
+            sources[0].subscribe(new MaybeMap.MapMaybeObserver<T, R>(observer, new SingletonArrayFunc()));
             return;
         }
 
@@ -59,16 +53,21 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
                 return;
             }
 
-            sources[i].subscribe(parent.observers[i]);
+            MaybeSource<? extends T> source = sources[i];
+
+            if (source == null) {
+                parent.innerError(new NullPointerException("One of the sources is null"), i);
+                return;
+            }
+            source.subscribe(parent.observers[i]);
         }
     }
 
     static final class ZipCoordinator<T, R> extends AtomicInteger implements Disposable {
 
-
         private static final long serialVersionUID = -5556924161382950569L;
 
-        final MaybeObserver<? super R> actual;
+        final MaybeObserver<? super R> downstream;
 
         final Function<? super Object[], ? extends R> zipper;
 
@@ -79,7 +78,7 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
         @SuppressWarnings("unchecked")
         ZipCoordinator(MaybeObserver<? super R> observer, int n, Function<? super Object[], ? extends R> zipper) {
             super(n);
-            this.actual = observer;
+            this.downstream = observer;
             this.zipper = zipper;
             ZipMaybeObserver<T>[] o = new ZipMaybeObserver[n];
             for (int i = 0; i < n; i++) {
@@ -112,11 +111,11 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
                     v = ObjectHelper.requireNonNull(zipper.apply(values), "The zipper returned a null value");
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    actual.onError(ex);
+                    downstream.onError(ex);
                     return;
                 }
 
-                actual.onSuccess(v);
+                downstream.onSuccess(v);
             }
         }
 
@@ -134,7 +133,7 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
         void innerError(Throwable ex, int index) {
             if (getAndSet(0) > 0) {
                 disposeExcept(index);
-                actual.onError(ex);
+                downstream.onError(ex);
             } else {
                 RxJavaPlugins.onError(ex);
             }
@@ -143,7 +142,7 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
         void innerComplete(int index) {
             if (getAndSet(0) > 0) {
                 disposeExcept(index);
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
     }
@@ -185,6 +184,13 @@ public final class MaybeZipArray<T, R> extends Maybe<R> {
         @Override
         public void onComplete() {
             parent.innerComplete(index);
+        }
+    }
+
+    final class SingletonArrayFunc implements Function<T, R> {
+        @Override
+        public R apply(T t) throws Exception {
+            return ObjectHelper.requireNonNull(zipper.apply(new Object[] { t }), "The zipper returned a null value");
         }
     }
 }

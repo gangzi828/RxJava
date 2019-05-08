@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -27,12 +27,12 @@ public final class CompletableMergeArray extends Completable {
     }
 
     @Override
-    public void subscribeActual(final CompletableObserver s) {
+    public void subscribeActual(final CompletableObserver observer) {
         final CompositeDisposable set = new CompositeDisposable();
-        final AtomicInteger wip = new AtomicInteger(sources.length + 1);
         final AtomicBoolean once = new AtomicBoolean();
 
-        s.onSubscribe(set);
+        InnerCompletableObserver shared = new InnerCompletableObserver(observer, once, set, sources.length + 1);
+        observer.onSubscribe(set);
 
         for (CompletableSource c : sources) {
             if (set.isDisposed()) {
@@ -42,45 +42,53 @@ public final class CompletableMergeArray extends Completable {
             if (c == null) {
                 set.dispose();
                 NullPointerException npe = new NullPointerException("A completable source is null");
-                if (once.compareAndSet(false, true)) {
-                    s.onError(npe);
-                } else {
-                    RxJavaPlugins.onError(npe);
-                }
+                shared.onError(npe);
                 return;
             }
 
-            c.subscribe(new CompletableObserver() {
-                @Override
-                public void onSubscribe(Disposable d) {
-                    set.add(d);
-                }
-
-                @Override
-                public void onError(Throwable e) {
-                    set.dispose();
-                    if (once.compareAndSet(false, true)) {
-                        s.onError(e);
-                    } else {
-                        RxJavaPlugins.onError(e);
-                    }
-                }
-
-                @Override
-                public void onComplete() {
-                    if (wip.decrementAndGet() == 0) {
-                        if (once.compareAndSet(false, true)) {
-                            s.onComplete();
-                        }
-                    }
-                }
-
-            });
+            c.subscribe(shared);
         }
 
-        if (wip.decrementAndGet() == 0) {
+        shared.onComplete();
+    }
+
+    static final class InnerCompletableObserver extends AtomicInteger implements CompletableObserver {
+        private static final long serialVersionUID = -8360547806504310570L;
+
+        final CompletableObserver downstream;
+
+        final AtomicBoolean once;
+
+        final CompositeDisposable set;
+
+        InnerCompletableObserver(CompletableObserver actual, AtomicBoolean once, CompositeDisposable set, int n) {
+            this.downstream = actual;
+            this.once = once;
+            this.set = set;
+            this.lazySet(n);
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            set.add(d);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            set.dispose();
             if (once.compareAndSet(false, true)) {
-                s.onComplete();
+                downstream.onError(e);
+            } else {
+                RxJavaPlugins.onError(e);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (decrementAndGet() == 0) {
+                if (once.compareAndSet(false, true)) {
+                    downstream.onComplete();
+                }
             }
         }
     }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -26,10 +26,10 @@ import io.reactivex.*;
 import io.reactivex.disposables.Disposables;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
-import io.reactivex.internal.fuseable.QueueDisposable;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.observers.*;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.subjects.UnicastSubject;
+import io.reactivex.subjects.*;
 
 public class ObservableDistinctUntilChangedTest {
 
@@ -140,9 +140,9 @@ public class ObservableDistinctUntilChangedTest {
 
     @Test
     public void customComparator() {
-        Observable<String> source = Observable.just("a", "b", "B", "A","a", "C");
+        Observable<String> source = Observable.just("a", "b", "B", "A", "a", "C");
 
-        TestObserver<String> ts = TestObserver.create();
+        TestObserver<String> to = TestObserver.create();
 
         source.distinctUntilChanged(new BiPredicate<String, String>() {
             @Override
@@ -150,18 +150,18 @@ public class ObservableDistinctUntilChangedTest {
                 return a.compareToIgnoreCase(b) == 0;
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.assertValues("a", "b", "A", "C");
-        ts.assertNoErrors();
-        ts.assertComplete();
+        to.assertValues("a", "b", "A", "C");
+        to.assertNoErrors();
+        to.assertComplete();
     }
 
     @Test
     public void customComparatorThrows() {
-        Observable<String> source = Observable.just("a", "b", "B", "A","a", "C");
+        Observable<String> source = Observable.just("a", "b", "B", "A", "a", "C");
 
-        TestObserver<String> ts = TestObserver.create();
+        TestObserver<String> to = TestObserver.create();
 
         source.distinctUntilChanged(new BiPredicate<String, String>() {
             @Override
@@ -169,16 +169,16 @@ public class ObservableDistinctUntilChangedTest {
                 throw new TestException();
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.assertValue("a");
-        ts.assertNotComplete();
-        ts.assertError(TestException.class);
+        to.assertValue("a");
+        to.assertNotComplete();
+        to.assertError(TestException.class);
     }
 
     @Test
     public void fused() {
-        TestObserver<Integer> to = ObserverFusion.newTest(QueueDisposable.ANY);
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ANY);
 
         Observable.just(1, 2, 2, 3, 3, 4, 5)
         .distinctUntilChanged(new BiPredicate<Integer, Integer>() {
@@ -190,14 +190,14 @@ public class ObservableDistinctUntilChangedTest {
         .subscribe(to);
 
         to.assertOf(ObserverFusion.<Integer>assertFuseable())
-        .assertOf(ObserverFusion.<Integer>assertFusionMode(QueueDisposable.SYNC))
+        .assertOf(ObserverFusion.<Integer>assertFusionMode(QueueFuseable.SYNC))
         .assertResult(1, 2, 3, 4, 5)
         ;
     }
 
     @Test
     public void fusedAsync() {
-        TestObserver<Integer> to = ObserverFusion.newTest(QueueDisposable.ANY);
+        TestObserver<Integer> to = ObserverFusion.newTest(QueueFuseable.ANY);
 
         UnicastSubject<Integer> up = UnicastSubject.create();
 
@@ -213,7 +213,7 @@ public class ObservableDistinctUntilChangedTest {
         TestHelper.emit(up, 1, 2, 2, 3, 3, 4, 5);
 
         to.assertOf(ObserverFusion.<Integer>assertFuseable())
-        .assertOf(ObserverFusion.<Integer>assertFusionMode(QueueDisposable.ASYNC))
+        .assertOf(ObserverFusion.<Integer>assertFusionMode(QueueFuseable.ASYNC))
         .assertResult(1, 2, 3, 4, 5)
         ;
     }
@@ -225,13 +225,13 @@ public class ObservableDistinctUntilChangedTest {
         try {
             Observable.wrap(new ObservableSource<Integer>() {
                 @Override
-                public void subscribe(Observer<? super Integer> s) {
-                    s.onSubscribe(Disposables.empty());
-                    s.onNext(1);
-                    s.onNext(2);
-                    s.onNext(3);
-                    s.onError(new IOException());
-                    s.onComplete();
+                public void subscribe(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onNext(1);
+                    observer.onNext(2);
+                    observer.onNext(3);
+                    observer.onError(new IOException());
+                    observer.onComplete();
                 }
             })
             .distinctUntilChanged(new BiPredicate<Integer, Integer>() {
@@ -243,9 +243,35 @@ public class ObservableDistinctUntilChangedTest {
             .test()
             .assertFailure(TestException.class, 1);
 
-            TestHelper.assertError(errors, 0, IOException.class);
+            TestHelper.assertUndeliverable(errors, 0, IOException.class);
         } finally {
             RxJavaPlugins.reset();
         }
    }
+
+    class Mutable {
+        int value;
+    }
+
+    @Test
+    public void mutableWithSelector() {
+        Mutable m = new Mutable();
+
+        PublishSubject<Mutable> ps = PublishSubject.create();
+
+        TestObserver<Mutable> to = ps.distinctUntilChanged(new Function<Mutable, Object>() {
+            @Override
+            public Object apply(Mutable m) throws Exception {
+                return m.value;
+            }
+        })
+        .test();
+
+        ps.onNext(m);
+        m.value = 1;
+        ps.onNext(m);
+        ps.onComplete();
+
+        to.assertResult(m, m);
+    }
 }

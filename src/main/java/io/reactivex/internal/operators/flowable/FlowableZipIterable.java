@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,21 +17,21 @@ import java.util.Iterator;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.plugins.RxJavaPlugins;
 
-public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
-    final Publisher<? extends T> source;
+public final class FlowableZipIterable<T, U, V> extends AbstractFlowableWithUpstream<T, V> {
     final Iterable<U> other;
     final BiFunction<? super T, ? super U, ? extends V> zipper;
 
     public FlowableZipIterable(
-            Publisher<? extends T> source,
+            Flowable<T> source,
             Iterable<U> other, BiFunction<? super T, ? super U, ? extends V> zipper) {
-        this.source = source;
+        super(source);
         this.other = other;
         this.zipper = zipper;
     }
@@ -41,15 +41,10 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
         Iterator<U> it;
 
         try {
-            it = other.iterator();
+            it = ObjectHelper.requireNonNull(other.iterator(), "The iterator returned by other is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             EmptySubscription.error(e, t);
-            return;
-        }
-
-        if (it == null) {
-            EmptySubscription.error(new NullPointerException("The iterator returned by other is null"), t);
             return;
         }
 
@@ -71,27 +66,27 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
         source.subscribe(new ZipIterableSubscriber<T, U, V>(t, it, zipper));
     }
 
-    static final class ZipIterableSubscriber<T, U, V> implements Subscriber<T>, Subscription {
-        final Subscriber<? super V> actual;
+    static final class ZipIterableSubscriber<T, U, V> implements FlowableSubscriber<T>, Subscription {
+        final Subscriber<? super V> downstream;
         final Iterator<U> iterator;
         final BiFunction<? super T, ? super U, ? extends V> zipper;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         ZipIterableSubscriber(Subscriber<? super V> actual, Iterator<U> iterator,
                 BiFunction<? super T, ? super U, ? extends V> zipper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.iterator = iterator;
             this.zipper = zipper;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
             }
         }
 
@@ -104,31 +99,21 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
             U u;
 
             try {
-                u = iterator.next();
+                u = ObjectHelper.requireNonNull(iterator.next(), "The iterator returned a null value");
             } catch (Throwable e) {
                 error(e);
                 return;
             }
 
-            if (u == null) {
-                error(new NullPointerException("The iterator returned a null value"));
-                return;
-            }
-
             V v;
             try {
-                v = zipper.apply(t, u);
+                v = ObjectHelper.requireNonNull(zipper.apply(t, u), "The zipper function returned a null value");
             } catch (Throwable e) {
-                error(new NullPointerException("The iterator returned a null value"));
+                error(e);
                 return;
             }
 
-            if (v == null) {
-                error(new NullPointerException("The zipper function returned a null value"));
-                return;
-            }
-
-            actual.onNext(v);
+            downstream.onNext(v);
 
             boolean b;
 
@@ -141,16 +126,16 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
 
             if (!b) {
                 done = true;
-                s.cancel();
-                actual.onComplete();
+                upstream.cancel();
+                downstream.onComplete();
             }
         }
 
         void error(Throwable e) {
             Exceptions.throwIfFatal(e);
             done = true;
-            s.cancel();
-            actual.onError(e);
+            upstream.cancel();
+            downstream.onError(e);
         }
 
         @Override
@@ -160,7 +145,7 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -169,17 +154,17 @@ public final class FlowableZipIterable<T, U, V> extends Flowable<V> {
                 return;
             }
             done = true;
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void request(long n) {
-            s.request(n);
+            upstream.request(n);
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
         }
 
     }

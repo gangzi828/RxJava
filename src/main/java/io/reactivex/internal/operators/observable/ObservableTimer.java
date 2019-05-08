@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -31,24 +31,24 @@ public final class ObservableTimer extends Observable<Long> {
     }
 
     @Override
-    public void subscribeActual(Observer<? super Long> s) {
-        IntervalOnceObserver ios = new IntervalOnceObserver(s);
-        s.onSubscribe(ios);
+    public void subscribeActual(Observer<? super Long> observer) {
+        TimerObserver ios = new TimerObserver(observer);
+        observer.onSubscribe(ios);
 
         Disposable d = scheduler.scheduleDirect(ios, delay, unit);
 
         ios.setResource(d);
     }
 
-    static final class IntervalOnceObserver extends AtomicReference<Disposable>
+    static final class TimerObserver extends AtomicReference<Disposable>
     implements Disposable, Runnable {
 
         private static final long serialVersionUID = -2809475196591179431L;
 
-        final Observer<? super Long> actual;
+        final Observer<? super Long> downstream;
 
-        IntervalOnceObserver(Observer<? super Long> actual) {
-            this.actual = actual;
+        TimerObserver(Observer<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
@@ -64,14 +64,14 @@ public final class ObservableTimer extends Observable<Long> {
         @Override
         public void run() {
             if (!isDisposed()) {
-                actual.onNext(0L);
-                actual.onComplete();
+                downstream.onNext(0L);
                 lazySet(EmptyDisposable.INSTANCE);
+                downstream.onComplete();
             }
         }
 
         public void setResource(Disposable d) {
-            DisposableHelper.setOnce(this, d);
+            DisposableHelper.trySet(this, d);
         }
     }
 }

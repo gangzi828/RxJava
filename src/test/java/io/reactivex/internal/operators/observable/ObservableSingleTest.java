@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -282,6 +282,7 @@ public class ObservableSingleTest {
 
         InOrder inOrder = inOrder(observer);
         inOrder.verify(observer).onComplete();
+        inOrder.verify(observer, never()).onError(any(Throwable.class));
         inOrder.verifyNoMoreInteractions();
     }
 
@@ -479,7 +480,7 @@ public class ObservableSingleTest {
                 }
             }).singleElement().test().assertComplete();
 
-            assertSame(exception, error.get());
+            assertSame(exception, error.get().getCause());
         } finally {
             RxJavaPlugins.reset();
         }
@@ -520,5 +521,48 @@ public class ObservableSingleTest {
             .assertNoValues()
             .assertErrorMessage("error")
             .assertError(RuntimeException.class);
+    }
+
+    @Test
+    public void badSource() {
+        TestHelper.checkBadSourceObservable(new Function<Observable<Object>, Object>() {
+            @Override
+            public Object apply(Observable<Object> o) throws Exception {
+                return o.singleOrError();
+            }
+        }, false, 1, 1, 1);
+
+        TestHelper.checkBadSourceObservable(new Function<Observable<Object>, Object>() {
+            @Override
+            public Object apply(Observable<Object> o) throws Exception {
+                return o.singleElement();
+            }
+        }, false, 1, 1, 1);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservableToSingle(new Function<Observable<Object>, SingleSource<Object>>() {
+            @Override
+            public SingleSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.singleOrError();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeObservableToMaybe(new Function<Observable<Object>, MaybeSource<Object>>() {
+            @Override
+            public MaybeSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.singleElement();
+            }
+        });
+    }
+
+    @Test
+    public void singleOrError() {
+        Observable.empty()
+        .singleOrError()
+        .toObservable()
+        .test()
+        .assertFailure(NoSuchElementException.class);
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,8 +25,8 @@ public class FlowableReduceTests {
 
     @Test
     public void reduceIntsFlowable() {
-        Flowable<Integer> o = Flowable.just(1, 2, 3);
-        int value = o.reduce(new BiFunction<Integer, Integer, Integer>() {
+        Flowable<Integer> f = Flowable.just(1, 2, 3);
+        int value = f.reduce(new BiFunction<Integer, Integer, Integer>() {
             @Override
             public Integer apply(Integer t1, Integer t2) {
                 return t1 + t2;
@@ -77,11 +77,10 @@ public class FlowableReduceTests {
         assertNotNull(reduceResult2);
     }
 
-
     @Test
     public void reduceInts() {
-        Flowable<Integer> o = Flowable.just(1, 2, 3);
-        int value = o.reduce(new BiFunction<Integer, Integer, Integer>() {
+        Flowable<Integer> f = Flowable.just(1, 2, 3);
+        int value = f.reduce(new BiFunction<Integer, Integer, Integer>() {
             @Override
             public Integer apply(Integer t1, Integer t2) {
                 return t1 + t2;

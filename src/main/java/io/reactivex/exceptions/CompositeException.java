@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package io.reactivex.exceptions;
 
 import java.io.*;
 import java.util.*;
+
+import io.reactivex.annotations.NonNull;
 
 /**
  * Represents an exception that is a composite of one or more other exceptions. A {@code CompositeException}
@@ -47,9 +49,9 @@ public final class CompositeException extends RuntimeException {
      *
      * @throws IllegalArgumentException if <code>exceptions</code> is empty.
      */
-    public CompositeException(Throwable... exceptions) {
+    public CompositeException(@NonNull Throwable... exceptions) {
         this(exceptions == null ?
-            Arrays.asList(new NullPointerException("exceptions was null")) : Arrays.asList(exceptions));
+                Collections.singletonList(new NullPointerException("exceptions was null")) : Arrays.asList(exceptions));
     }
 
     /**
@@ -59,7 +61,7 @@ public final class CompositeException extends RuntimeException {
      *
      * @throws IllegalArgumentException if <code>errors</code> is empty.
      */
-    public CompositeException(Iterable<? extends Throwable> errors) {
+    public CompositeException(@NonNull Iterable<? extends Throwable> errors) {
         Set<Throwable> deDupedExceptions = new LinkedHashSet<Throwable>();
         List<Throwable> localExceptions = new ArrayList<Throwable>();
         if (errors != null) {
@@ -89,16 +91,19 @@ public final class CompositeException extends RuntimeException {
      *
      * @return the exceptions that make up the {@code CompositeException}, as a {@link List} of {@link Throwable}s
      */
+    @NonNull
     public List<Throwable> getExceptions() {
         return exceptions;
     }
 
     @Override
+    @NonNull
     public String getMessage() {
         return message;
     }
 
     @Override
+    @NonNull
     public synchronized Throwable getCause() { // NOPMD
         if (cause == null) {
             // we lazily generate this causal chain if this is called
@@ -129,7 +134,7 @@ public final class CompositeException extends RuntimeException {
                     chain.initCause(e);
                 } catch (Throwable t) { // NOPMD
                     // ignore
-                    // the javadocs say that some Throwables (depending on how they're made) will never
+                    // the JavaDocs say that some Throwables (depending on how they're made) will never
                     // let me call initCause without blowing up even if it returns null
                 }
                 chain = getRootCause(chain);
@@ -273,9 +278,9 @@ public final class CompositeException extends RuntimeException {
      * @param e the {@link Throwable} {@code e}.
      * @return The root cause of {@code e}. If {@code e.getCause()} returns {@code null} or {@code e}, just return {@code e} itself.
      */
-    private Throwable getRootCause(Throwable e) {
+    /*private */Throwable getRootCause(Throwable e) {
         Throwable root = e.getCause();
-        if (root == null || cause == root) {
+        if (root == null || e == root) {
             return e;
         }
         while (true) {

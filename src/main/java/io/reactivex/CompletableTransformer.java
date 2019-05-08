@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,8 @@
 
 package io.reactivex;
 
+import io.reactivex.annotations.*;
+
 /**
  * Convenience interface and callback used by the compose operator to turn a Completable into another
  * Completable fluently.
@@ -22,8 +24,7 @@ public interface CompletableTransformer {
      * Applies a function to the upstream Completable and returns a CompletableSource.
      * @param upstream the upstream Completable instance
      * @return the transformed CompletableSource instance
-     * @throws Exception in case the transformation throws, checked exceptions will be wrapped
-     * into a RuntimeException
      */
-    CompletableSource apply(Completable upstream) throws Exception;
+    @NonNull
+    CompletableSource apply(@NonNull Completable upstream);
 }

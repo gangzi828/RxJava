@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,13 +13,17 @@
 
 package io.reactivex.internal.operators.observable;
 
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import org.junit.Test;
 import org.mockito.InOrder;
 
 import io.reactivex.*;
-import io.reactivex.functions.Predicate;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.subjects.PublishSubject;
 
 public class ObservableSkipWhileTest {
 
@@ -127,5 +131,28 @@ public class ObservableSkipWhileTest {
             inOrder.verify(o).onComplete();
             verify(o, never()).onError(any(Throwable.class));
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishSubject.create().skipWhile(Functions.alwaysFalse()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.skipWhile(Functions.alwaysFalse());
+            }
+        });
+    }
+
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .skipWhile(Functions.alwaysFalse())
+        .test()
+        .assertFailure(TestException.class);
     }
 }

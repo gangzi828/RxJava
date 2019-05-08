@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,10 +14,14 @@
 package io.reactivex.internal.operators.completable;
 
 import static org.junit.Assert.*;
+
+import java.util.List;
+
 import org.junit.Test;
 
 import io.reactivex.*;
 import io.reactivex.disposables.Disposables;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public class CompletableUnsafeTest {
 
@@ -36,9 +40,9 @@ public class CompletableUnsafeTest {
 
         Completable.wrap(new CompletableSource() {
             @Override
-            public void subscribe(CompletableObserver s) {
-                s.onSubscribe(Disposables.empty());
-                s.onComplete();
+            public void subscribe(CompletableObserver observer) {
+                observer.onSubscribe(Disposables.empty());
+                observer.onComplete();
             }
         })
         .test()
@@ -49,7 +53,7 @@ public class CompletableUnsafeTest {
     public void unsafeCreateThrowsNPE() {
         Completable.unsafeCreate(new CompletableSource() {
             @Override
-            public void subscribe(CompletableObserver s) {
+            public void subscribe(CompletableObserver observer) {
                 throw new NullPointerException();
             }
         }).test();
@@ -57,10 +61,11 @@ public class CompletableUnsafeTest {
 
     @Test
     public void unsafeCreateThrowsIAE() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
         try {
             Completable.unsafeCreate(new CompletableSource() {
                 @Override
-                public void subscribe(CompletableObserver s) {
+                public void subscribe(CompletableObserver observer) {
                     throw new IllegalArgumentException();
                 }
             }).test();
@@ -69,6 +74,10 @@ public class CompletableUnsafeTest {
             if (!(ex.getCause() instanceof IllegalArgumentException)) {
                 fail(ex.toString() + ": should have thrown NPA(IAE)");
             }
+
+            TestHelper.assertError(errors, 0, IllegalArgumentException.class);
+        } finally {
+            RxJavaPlugins.reset();
         }
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -29,12 +29,12 @@ public class FlowableThrottleWithTimeoutTests {
 
     @Test
     public void testThrottle() {
-        Subscriber<Integer> observer = TestHelper.mockSubscriber();
+        Subscriber<Integer> subscriber = TestHelper.mockSubscriber();
 
         TestScheduler s = new TestScheduler();
         PublishProcessor<Integer> o = PublishProcessor.create();
         o.throttleWithTimeout(500, TimeUnit.MILLISECONDS, s)
-        .subscribe(observer);
+        .subscribe(subscriber);
 
         // send events with simulated time increments
         s.advanceTimeTo(0, TimeUnit.MILLISECONDS);
@@ -52,11 +52,11 @@ public class FlowableThrottleWithTimeoutTests {
         s.advanceTimeTo(1800, TimeUnit.MILLISECONDS);
         o.onComplete();
 
-        InOrder inOrder = inOrder(observer);
-        inOrder.verify(observer).onNext(2);
-        inOrder.verify(observer).onNext(6);
-        inOrder.verify(observer).onNext(7);
-        inOrder.verify(observer).onComplete();
+        InOrder inOrder = inOrder(subscriber);
+        inOrder.verify(subscriber).onNext(2);
+        inOrder.verify(subscriber).onNext(6);
+        inOrder.verify(subscriber).onNext(7);
+        inOrder.verify(subscriber).onComplete();
         inOrder.verifyNoMoreInteractions();
     }
 

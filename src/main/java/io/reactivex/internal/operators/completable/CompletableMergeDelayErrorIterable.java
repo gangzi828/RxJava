@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,23 +32,18 @@ public final class CompletableMergeDelayErrorIterable extends Completable {
     }
 
     @Override
-    public void subscribeActual(final CompletableObserver s) {
+    public void subscribeActual(final CompletableObserver observer) {
         final CompositeDisposable set = new CompositeDisposable();
 
-        s.onSubscribe(set);
+        observer.onSubscribe(set);
 
         Iterator<? extends CompletableSource> iterator;
 
         try {
-            iterator = sources.iterator();
+            iterator = ObjectHelper.requireNonNull(sources.iterator(), "The source iterator returned is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            s.onError(e);
-            return;
-        }
-
-        if (iterator == null) {
-            s.onError(new NullPointerException("The source iterator returned is null"));
+            observer.onError(e);
             return;
         }
 
@@ -94,15 +89,15 @@ public final class CompletableMergeDelayErrorIterable extends Completable {
 
             wip.getAndIncrement();
 
-            c.subscribe(new MergeInnerCompletableObserver(s, set, error, wip));
+            c.subscribe(new MergeInnerCompletableObserver(observer, set, error, wip));
         }
 
         if (wip.decrementAndGet() == 0) {
             Throwable ex = error.terminate();
             if (ex == null) {
-                s.onComplete();
+                observer.onComplete();
             } else {
-                s.onError(ex);
+                observer.onError(ex);
             }
         }
     }

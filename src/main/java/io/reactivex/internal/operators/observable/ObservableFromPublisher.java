@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,71 +12,68 @@
  */
 package io.reactivex.internal.operators.observable;
 
-import io.reactivex.Observable;
-import io.reactivex.Observer;
+import org.reactivestreams.*;
+
+import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import java.util.concurrent.atomic.AtomicBoolean;
-import org.reactivestreams.Publisher;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
+import io.reactivex.internal.subscriptions.SubscriptionHelper;
 
 public final class ObservableFromPublisher<T> extends Observable<T> {
-    private final Publisher<? extends T> publisher;
+
+    final Publisher<? extends T> source;
 
     public ObservableFromPublisher(Publisher<? extends T> publisher) {
-        this.publisher = publisher;
+        this.source = publisher;
     }
 
     @Override
     protected void subscribeActual(final Observer<? super T> o) {
-        publisher.subscribe(new PublisherSubscriber<T>(o));
+        source.subscribe(new PublisherSubscriber<T>(o));
     }
 
     static final class PublisherSubscriber<T>
-    extends AtomicBoolean
-    implements Subscriber<T>, Disposable {
+    implements FlowableSubscriber<T>, Disposable {
 
-
-        private static final long serialVersionUID = -7306579371159152354L;
-
-        private final Observer<? super T> o;
-        private Subscription inner;
+        final Observer<? super T> downstream;
+        Subscription upstream;
 
         PublisherSubscriber(Observer<? super T> o) {
-            this.o = o;
+            this.downstream = o;
         }
 
         @Override
         public void onComplete() {
-            o.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void onError(Throwable t) {
-            o.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onNext(T t) {
-            o.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
-        public void onSubscribe(Subscription inner) {
-            this.inner = inner;
-            o.onSubscribe(this);
-            inner.request(Long.MAX_VALUE);
-        }
-
-        @Override public void dispose() {
-            if (compareAndSet(false, true)) {
-                inner.cancel();
-                inner = null;
+        public void onSubscribe(Subscription s) {
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
+                s.request(Long.MAX_VALUE);
             }
         }
 
-        @Override public boolean isDisposed() {
-            return get();
+        @Override
+        public void dispose() {
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
+        }
+
+        @Override
+        public boolean isDisposed() {
+            return upstream == SubscriptionHelper.CANCELLED;
         }
     }
 }

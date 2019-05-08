@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,6 +15,7 @@ package io.reactivex.single;
 
 import static org.junit.Assert.*;
 
+import java.io.IOException;
 import java.util.List;
 
 import org.junit.Test;
@@ -140,7 +141,7 @@ public class SingleSubscribeTest {
                 }
             });
 
-            TestHelper.assertError(list, 0, TestException.class);
+            TestHelper.assertUndeliverable(list, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -181,7 +182,7 @@ public class SingleSubscribeTest {
                 }
             });
 
-            TestHelper.assertError(list, 0, TestException.class);
+            TestHelper.assertUndeliverable(list, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -216,5 +217,51 @@ public class SingleSubscribeTest {
         ps.single(-99).test(false);
 
         assertTrue(ps.hasObservers());
+    }
+
+    @Test
+    public void successIsDisposed() {
+        assertTrue(Single.just(1).subscribe().isDisposed());
+    }
+
+    @Test
+    public void errorIsDisposed() {
+        assertTrue(Single.error(new TestException()).subscribe(Functions.emptyConsumer(), Functions.emptyConsumer()).isDisposed());
+    }
+
+    @Test
+    public void biConsumerIsDisposedOnSuccess() {
+        final Object[] result = { null, null };
+
+        Disposable d = Single.just(1)
+        .subscribe(new BiConsumer<Integer, Throwable>() {
+            @Override
+            public void accept(Integer t1, Throwable t2) throws Exception {
+                result[0] = t1;
+                result[1] = t2;
+            }
+        });
+
+        assertTrue("Not disposed?!", d.isDisposed());
+        assertEquals(1, result[0]);
+        assertNull(result[1]);
+    }
+
+    @Test
+    public void biConsumerIsDisposedOnError() {
+        final Object[] result = { null, null };
+
+        Disposable d = Single.<Integer>error(new IOException())
+        .subscribe(new BiConsumer<Integer, Throwable>() {
+            @Override
+            public void accept(Integer t1, Throwable t2) throws Exception {
+                result[0] = t1;
+                result[1] = t2;
+            }
+        });
+
+        assertTrue("Not disposed?!", d.isDisposed());
+        assertNull(result[0]);
+        assertTrue("" + result[1], result[1] instanceof IOException);
     }
 }

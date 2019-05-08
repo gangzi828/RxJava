@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -11,10 +11,10 @@
  * the License for the specific language governing permissions and limitations under the License.
  */
 
-
 package io.reactivex.internal.operators.observable;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.functions.Function;
 import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.observers.BasicFuseableObserver;
@@ -32,7 +32,6 @@ public final class ObservableMap<T, U> extends AbstractObservableWithUpstream<T,
         source.subscribe(new MapObserver<T, U>(t, function));
     }
 
-
     static final class MapObserver<T, U> extends BasicFuseableObserver<T, U> {
         final Function<? super T, ? extends U> mapper;
 
@@ -48,7 +47,7 @@ public final class ObservableMap<T, U> extends AbstractObservableWithUpstream<T,
             }
 
             if (sourceMode != NONE) {
-                actual.onNext(null);
+                downstream.onNext(null);
                 return;
             }
 
@@ -60,7 +59,7 @@ public final class ObservableMap<T, U> extends AbstractObservableWithUpstream<T,
                 fail(ex);
                 return;
             }
-            actual.onNext(v);
+            downstream.onNext(v);
         }
 
         @Override
@@ -68,9 +67,10 @@ public final class ObservableMap<T, U> extends AbstractObservableWithUpstream<T,
             return transitiveBoundaryFusion(mode);
         }
 
+        @Nullable
         @Override
         public U poll() throws Exception {
-            T t = qs.poll();
+            T t = qd.poll();
             return t != null ? ObjectHelper.<U>requireNonNull(mapper.apply(t), "The mapper function returned a null value.") : null;
         }
     }

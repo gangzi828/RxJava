@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import org.junit.Test;
 
 import io.reactivex.TestHelper;
 import io.reactivex.functions.*;
+import io.reactivex.internal.util.AppendOnlyLinkedArrayList.NonThrowingPredicate;
 
 public class MiscUtilTest {
     @Test
@@ -74,6 +75,27 @@ public class MiscUtilTest {
 
         final List<Integer> out = new ArrayList<Integer>();
 
+        list.forEachWhile(new NonThrowingPredicate<Integer>() {
+            @Override
+            public boolean test(Integer t2) {
+                out.add(t2);
+                return t2 == 2;
+            }
+        });
+
+        assertEquals(Arrays.asList(1, 2), out);
+    }
+
+    @Test
+    public void appendOnlyLinkedArrayListForEachWhileBi() throws Exception {
+        AppendOnlyLinkedArrayList<Integer> list = new AppendOnlyLinkedArrayList<Integer>(2);
+
+        list.add(1);
+        list.add(2);
+        list.add(3);
+
+        final List<Integer> out = new ArrayList<Integer>();
+
         list.forEachWhile(2, new BiPredicate<Integer, Integer>() {
             @Override
             public boolean test(Integer t1, Integer t2) throws Exception {
@@ -85,7 +107,6 @@ public class MiscUtilTest {
         assertEquals(Arrays.asList(1, 2), out);
     }
 
-
     @Test
     public void appendOnlyLinkedArrayListForEachWhilePreGrow() throws Exception {
         AppendOnlyLinkedArrayList<Integer> list = new AppendOnlyLinkedArrayList<Integer>(12);
@@ -96,9 +117,9 @@ public class MiscUtilTest {
 
         final List<Integer> out = new ArrayList<Integer>();
 
-        list.forEachWhile(new Predicate<Integer>() {
+        list.forEachWhile(new NonThrowingPredicate<Integer>() {
             @Override
-            public boolean test(Integer t2) throws Exception {
+            public boolean test(Integer t2) {
                 out.add(t2);
                 return t2 == 2;
             }
@@ -117,9 +138,9 @@ public class MiscUtilTest {
 
         final List<Integer> out = new ArrayList<Integer>();
 
-        list.forEachWhile(new Predicate<Integer>() {
+        list.forEachWhile(new NonThrowingPredicate<Integer>() {
             @Override
-            public boolean test(Integer t2) throws Exception {
+            public boolean test(Integer t2) {
                 out.add(t2);
                 return t2 == 2;
             }
@@ -138,9 +159,9 @@ public class MiscUtilTest {
 
         final List<Integer> out = new ArrayList<Integer>();
 
-        list.forEachWhile(new Predicate<Integer>() {
+        list.forEachWhile(new NonThrowingPredicate<Integer>() {
             @Override
-            public boolean test(Integer t2) throws Exception {
+            public boolean test(Integer t2) {
                 out.add(t2);
                 return t2 == 3;
             }
@@ -159,9 +180,9 @@ public class MiscUtilTest {
 
         final List<Integer> out = new ArrayList<Integer>();
 
-        list.forEachWhile(new Predicate<Integer>() {
+        list.forEachWhile(new NonThrowingPredicate<Integer>() {
             @Override
-            public boolean test(Integer t2) throws Exception {
+            public boolean test(Integer t2) {
                 out.add(t2);
                 return false;
             }

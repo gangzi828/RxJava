@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,8 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.*;
 
 import io.reactivex.*;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Function;
@@ -33,20 +35,23 @@ import io.reactivex.plugins.RxJavaPlugins;
  */
 public final class ObservableWithLatestFromMany<T, R> extends AbstractObservableWithUpstream<T, R> {
 
+    @Nullable
     final ObservableSource<?>[] otherArray;
 
+    @Nullable
     final Iterable<? extends ObservableSource<?>> otherIterable;
 
+    @NonNull
     final Function<? super Object[], R> combiner;
 
-    public ObservableWithLatestFromMany(ObservableSource<T> source, ObservableSource<?>[] otherArray, Function<? super Object[], R> combiner) {
+    public ObservableWithLatestFromMany(@NonNull ObservableSource<T> source, @NonNull ObservableSource<?>[] otherArray, @NonNull Function<? super Object[], R> combiner) {
         super(source);
         this.otherArray = otherArray;
         this.otherIterable = null;
         this.combiner = combiner;
     }
 
-    public ObservableWithLatestFromMany(ObservableSource<T> source, Iterable<? extends ObservableSource<?>> otherIterable, Function<? super Object[], R> combiner) {
+    public ObservableWithLatestFromMany(@NonNull ObservableSource<T> source, @NonNull Iterable<? extends ObservableSource<?>> otherIterable, @NonNull Function<? super Object[], R> combiner) {
         super(source);
         this.otherArray = null;
         this.otherIterable = otherIterable;
@@ -54,7 +59,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
     }
 
     @Override
-    protected void subscribeActual(Observer<? super R> s) {
+    protected void subscribeActual(Observer<? super R> observer) {
         ObservableSource<?>[] others = otherArray;
         int n = 0;
         if (others == null) {
@@ -69,7 +74,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
                 }
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                EmptyDisposable.error(ex, s);
+                EmptyDisposable.error(ex, observer);
                 return;
             }
 
@@ -78,17 +83,12 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
         }
 
         if (n == 0) {
-            new ObservableMap<T, R>(source, new Function<T, R>() {
-                @Override
-                public R apply(T t) throws Exception {
-                    return combiner.apply(new Object[] { t });
-                }
-            }).subscribeActual(s);
+            new ObservableMap<T, R>(source, new SingletonArrayFunc()).subscribeActual(observer);
             return;
         }
 
-        WithLatestFromObserver<T, R> parent = new WithLatestFromObserver<T, R>(s, combiner, n);
-        s.onSubscribe(parent);
+        WithLatestFromObserver<T, R> parent = new WithLatestFromObserver<T, R>(observer, combiner, n);
+        observer.onSubscribe(parent);
         parent.subscribe(others, n);
 
         source.subscribe(parent);
@@ -100,7 +100,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
 
         private static final long serialVersionUID = 1577321883966341961L;
 
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
 
         final Function<? super Object[], R> combiner;
 
@@ -108,14 +108,14 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
 
         final AtomicReferenceArray<Object> values;
 
-        final AtomicReference<Disposable> d;
+        final AtomicReference<Disposable> upstream;
 
         final AtomicThrowable error;
 
         volatile boolean done;
 
         WithLatestFromObserver(Observer<? super R> actual, Function<? super Object[], R> combiner, int n) {
-            this.actual = actual;
+            this.downstream = actual;
             this.combiner = combiner;
             WithLatestInnerObserver[] s = new WithLatestInnerObserver[n];
             for (int i = 0; i < n; i++) {
@@ -123,15 +123,15 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
             }
             this.observers = s;
             this.values = new AtomicReferenceArray<Object>(n);
-            this.d = new AtomicReference<Disposable>();
+            this.upstream = new AtomicReference<Disposable>();
             this.error = new AtomicThrowable();
         }
 
         void subscribe(ObservableSource<?>[] others, int n) {
             WithLatestInnerObserver[] observers = this.observers;
-            AtomicReference<Disposable> s = this.d;
+            AtomicReference<Disposable> upstream = this.upstream;
             for (int i = 0; i < n; i++) {
-                if (DisposableHelper.isDisposed(s.get()) || done) {
+                if (DisposableHelper.isDisposed(upstream.get()) || done) {
                     return;
                 }
                 others[i].subscribe(observers[i]);
@@ -140,7 +140,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
 
         @Override
         public void onSubscribe(Disposable d) {
-            DisposableHelper.setOnce(this.d, d);
+            DisposableHelper.setOnce(this.upstream, d);
         }
 
         @Override
@@ -173,7 +173,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
                 return;
             }
 
-            HalfSerializer.onNext(actual, v, this, error);
+            HalfSerializer.onNext(downstream, v, this, error);
         }
 
         @Override
@@ -184,7 +184,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
             }
             done = true;
             cancelAllBut(-1);
-            HalfSerializer.onError(actual, t, this, error);
+            HalfSerializer.onError(downstream, t, this, error);
         }
 
         @Override
@@ -192,20 +192,20 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
             if (!done) {
                 done = true;
                 cancelAllBut(-1);
-                HalfSerializer.onComplete(actual, this, error);
+                HalfSerializer.onComplete(downstream, this, error);
             }
         }
 
         @Override
         public boolean isDisposed() {
-            return DisposableHelper.isDisposed(d.get());
+            return DisposableHelper.isDisposed(upstream.get());
         }
 
         @Override
         public void dispose() {
-            DisposableHelper.dispose(d);
-            for (Disposable s : observers) {
-                s.dispose();
+            DisposableHelper.dispose(upstream);
+            for (WithLatestInnerObserver observer : observers) {
+                observer.dispose();
             }
         }
 
@@ -215,16 +215,16 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
 
         void innerError(int index, Throwable t) {
             done = true;
-            DisposableHelper.dispose(d);
+            DisposableHelper.dispose(upstream);
             cancelAllBut(index);
-            HalfSerializer.onError(actual, t, this, error);
+            HalfSerializer.onError(downstream, t, this, error);
         }
 
         void innerComplete(int index, boolean nonEmpty) {
             if (!nonEmpty) {
                 done = true;
                 cancelAllBut(index);
-                HalfSerializer.onComplete(actual, this, error);
+                HalfSerializer.onComplete(downstream, this, error);
             }
         }
 
@@ -240,7 +240,7 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
 
     static final class WithLatestInnerObserver
     extends AtomicReference<Disposable>
-    implements Observer<Object>, Disposable {
+    implements Observer<Object> {
 
         private static final long serialVersionUID = 3256684027868224024L;
 
@@ -278,14 +278,15 @@ public final class ObservableWithLatestFromMany<T, R> extends AbstractObservable
             parent.innerComplete(index, hasValue);
         }
 
-        @Override
-        public boolean isDisposed() {
-            return DisposableHelper.isDisposed(get());
-        }
-
-        @Override
         public void dispose() {
             DisposableHelper.dispose(this);
+        }
+    }
+
+    final class SingletonArrayFunc implements Function<T, R> {
+        @Override
+        public R apply(T t) throws Exception {
+            return ObjectHelper.requireNonNull(combiner.apply(new Object[] { t }), "The combiner returned a null value");
         }
     }
 }

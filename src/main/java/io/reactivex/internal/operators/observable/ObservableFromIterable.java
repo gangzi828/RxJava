@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.operators.observable;
 import java.util.Iterator;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.functions.ObjectHelper;
@@ -28,13 +29,13 @@ public final class ObservableFromIterable<T> extends Observable<T> {
     }
 
     @Override
-    public void subscribeActual(Observer<? super T> s) {
+    public void subscribeActual(Observer<? super T> observer) {
         Iterator<? extends T> it;
         try {
             it = source.iterator();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            EmptyDisposable.error(e, s);
+            EmptyDisposable.error(e, observer);
             return;
         }
         boolean hasNext;
@@ -42,16 +43,16 @@ public final class ObservableFromIterable<T> extends Observable<T> {
             hasNext = it.hasNext();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            EmptyDisposable.error(e, s);
+            EmptyDisposable.error(e, observer);
             return;
         }
         if (!hasNext) {
-            EmptyDisposable.complete(s);
+            EmptyDisposable.complete(observer);
             return;
         }
 
-        FromIterableDisposable<T> d = new FromIterableDisposable<T>(s, it);
-        s.onSubscribe(d);
+        FromIterableDisposable<T> d = new FromIterableDisposable<T>(observer, it);
+        observer.onSubscribe(d);
 
         if (!d.fusionMode) {
             d.run();
@@ -60,7 +61,7 @@ public final class ObservableFromIterable<T> extends Observable<T> {
 
     static final class FromIterableDisposable<T> extends BasicQueueDisposable<T> {
 
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
 
         final Iterator<? extends T> it;
 
@@ -73,7 +74,7 @@ public final class ObservableFromIterable<T> extends Observable<T> {
         boolean checkNext;
 
         FromIterableDisposable(Observer<? super T> actual, Iterator<? extends T> it) {
-            this.actual = actual;
+            this.downstream = actual;
             this.it = it;
         }
 
@@ -90,11 +91,11 @@ public final class ObservableFromIterable<T> extends Observable<T> {
                     v = ObjectHelper.requireNonNull(it.next(), "The iterator returned a null value");
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
-                    actual.onError(e);
+                    downstream.onError(e);
                     return;
                 }
 
-                actual.onNext(v);
+                downstream.onNext(v);
 
                 if (isDisposed()) {
                     return;
@@ -103,13 +104,13 @@ public final class ObservableFromIterable<T> extends Observable<T> {
                     hasNext = it.hasNext();
                 } catch (Throwable e) {
                     Exceptions.throwIfFatal(e);
-                    actual.onError(e);
+                    downstream.onError(e);
                     return;
                 }
             } while (hasNext);
 
             if (!isDisposed()) {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
@@ -122,6 +123,7 @@ public final class ObservableFromIterable<T> extends Observable<T> {
             return NONE;
         }
 
+        @Nullable
         @Override
         public T poll() {
             if (done) {

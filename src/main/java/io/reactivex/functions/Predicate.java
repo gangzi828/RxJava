@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,8 @@
 
 package io.reactivex.functions;
 
+import io.reactivex.annotations.NonNull;
+
 /**
  * A functional interface (callback) that returns true or false for the given input value.
  * @param <T> the first value
@@ -24,5 +26,5 @@ public interface Predicate<T> {
      * @return the boolean result
      * @throws Exception on error
      */
-    boolean test(T t) throws Exception;
+    boolean test(@NonNull T t) throws Exception;
 }

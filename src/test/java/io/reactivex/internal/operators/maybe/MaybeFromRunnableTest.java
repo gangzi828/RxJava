@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.maybe;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 import java.util.List;
 import java.util.concurrent.*;
@@ -134,7 +135,7 @@ public class MaybeFromRunnableTest {
                 public void run() {
                     cdl1.countDown();
                     try {
-                        cdl2.await();
+                        cdl2.await(5, TimeUnit.SECONDS);
                     } catch (InterruptedException ex) {
                         throw new RuntimeException(ex);
                     }
@@ -145,19 +146,44 @@ public class MaybeFromRunnableTest {
 
             to.cancel();
 
-            cdl2.countDown();
-
             int timeout = 10;
 
             while (timeout-- > 0 && errors.isEmpty()) {
                 Thread.sleep(100);
             }
 
-            TestHelper.assertError(errors, 0, RuntimeException.class);
+            TestHelper.assertUndeliverable(errors, 0, RuntimeException.class);
 
-            assertTrue(errors.get(0).toString(), errors.get(0).getCause() instanceof InterruptedException);
+            assertTrue(errors.get(0).toString(), errors.get(0).getCause().getCause() instanceof InterruptedException);
         } finally {
             RxJavaPlugins.reset();
         }
+    }
+
+    @Test
+    public void disposedUpfront() {
+        Runnable run = mock(Runnable.class);
+
+        Maybe.fromRunnable(run)
+        .test(true)
+        .assertEmpty();
+
+        verify(run, never()).run();
+    }
+
+    @Test
+    public void cancelWhileRunning() {
+        final TestObserver<Object> to = new TestObserver<Object>();
+
+        Maybe.fromRunnable(new Runnable() {
+            @Override
+            public void run() {
+                to.dispose();
+            }
+        })
+        .subscribeWith(to)
+        .assertEmpty();
+
+        assertTrue(to.isDisposed());
     }
 }

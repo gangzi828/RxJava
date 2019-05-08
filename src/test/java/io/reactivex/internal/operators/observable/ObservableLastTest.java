@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,15 +14,17 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+
+import java.util.NoSuchElementException;
 
 import org.junit.Test;
 import org.mockito.InOrder;
 
-import java.util.NoSuchElementException;
-
 import io.reactivex.*;
-import io.reactivex.functions.Predicate;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.*;
 
 public class ObservableLastTest {
 
@@ -293,5 +295,85 @@ public class ObservableLastTest {
             .assertNoValues()
             .assertErrorMessage("error")
             .assertError(RuntimeException.class);
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.never().lastElement().toObservable());
+        TestHelper.checkDisposed(Observable.never().lastElement());
+
+        TestHelper.checkDisposed(Observable.just(1).lastOrError().toObservable());
+        TestHelper.checkDisposed(Observable.just(1).lastOrError());
+
+        TestHelper.checkDisposed(Observable.just(1).last(2).toObservable());
+        TestHelper.checkDisposed(Observable.just(1).last(2));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservableToMaybe(new Function<Observable<Object>, MaybeSource<Object>>() {
+            @Override
+            public MaybeSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.lastElement();
+            }
+        });
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.lastElement().toObservable();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeObservableToSingle(new Function<Observable<Object>, SingleSource<Object>>() {
+            @Override
+            public SingleSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.lastOrError();
+            }
+        });
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.lastOrError().toObservable();
+            }
+        });
+
+        TestHelper.checkDoubleOnSubscribeObservableToSingle(new Function<Observable<Object>, SingleSource<Object>>() {
+            @Override
+            public SingleSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.last(2);
+            }
+        });
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> o) throws Exception {
+                return o.last(2).toObservable();
+            }
+        });
+    }
+
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .lastElement()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void errorLastOrErrorObservable() {
+        Observable.error(new TestException())
+        .lastOrError()
+        .toObservable()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void emptyLastOrErrorObservable() {
+        Observable.empty()
+        .lastOrError()
+        .toObservable()
+        .test()
+        .assertFailure(NoSuchElementException.class);
     }
 }

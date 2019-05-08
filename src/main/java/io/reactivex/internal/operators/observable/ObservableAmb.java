@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,7 +32,7 @@ public final class ObservableAmb<T> extends Observable<T> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public void subscribeActual(Observer<? super T> s) {
+    public void subscribeActual(Observer<? super T> observer) {
         ObservableSource<? extends T>[] sources = this.sources;
         int count = 0;
         if (sources == null) {
@@ -40,7 +40,7 @@ public final class ObservableAmb<T> extends Observable<T> {
             try {
                 for (ObservableSource<? extends T> p : sourcesIterable) {
                     if (p == null) {
-                        EmptyDisposable.error(new NullPointerException("One of the sources is null"), s);
+                        EmptyDisposable.error(new NullPointerException("One of the sources is null"), observer);
                         return;
                     }
                     if (count == sources.length) {
@@ -52,7 +52,7 @@ public final class ObservableAmb<T> extends Observable<T> {
                 }
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                EmptyDisposable.error(e, s);
+                EmptyDisposable.error(e, observer);
                 return;
             }
         } else {
@@ -60,27 +60,27 @@ public final class ObservableAmb<T> extends Observable<T> {
         }
 
         if (count == 0) {
-            EmptyDisposable.complete(s);
+            EmptyDisposable.complete(observer);
             return;
         } else
         if (count == 1) {
-            sources[0].subscribe(s);
+            sources[0].subscribe(observer);
             return;
         }
 
-        AmbCoordinator<T> ac = new AmbCoordinator<T>(s, count);
+        AmbCoordinator<T> ac = new AmbCoordinator<T>(observer, count);
         ac.subscribe(sources);
     }
 
     static final class AmbCoordinator<T> implements Disposable {
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final AmbInnerObserver<T>[] observers;
 
         final AtomicInteger winner = new AtomicInteger();
 
         @SuppressWarnings("unchecked")
         AmbCoordinator(Observer<? super T> actual, int count) {
-            this.actual = actual;
+            this.downstream = actual;
             this.observers = new AmbInnerObserver[count];
         }
 
@@ -88,10 +88,10 @@ public final class ObservableAmb<T> extends Observable<T> {
             AmbInnerObserver<T>[] as = observers;
             int len = as.length;
             for (int i = 0; i < len; i++) {
-                as[i] = new AmbInnerObserver<T>(this, i + 1, actual);
+                as[i] = new AmbInnerObserver<T>(this, i + 1, downstream);
             }
             winner.lazySet(0); // release the contents of 'as'
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
 
             for (int i = 0; i < len; i++) {
                 if (winner.get() != 0) {
@@ -137,34 +137,34 @@ public final class ObservableAmb<T> extends Observable<T> {
         }
     }
 
-    static final class AmbInnerObserver<T> extends AtomicReference<Disposable> implements Observer<T>, Disposable {
+    static final class AmbInnerObserver<T> extends AtomicReference<Disposable> implements Observer<T> {
 
         private static final long serialVersionUID = -1185974347409665484L;
         final AmbCoordinator<T> parent;
         final int index;
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
 
         boolean won;
 
-        AmbInnerObserver(AmbCoordinator<T> parent, int index, Observer<? super T> actual) {
+        AmbInnerObserver(AmbCoordinator<T> parent, int index, Observer<? super T> downstream) {
             this.parent = parent;
             this.index = index;
-            this.actual = actual;
+            this.downstream = downstream;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            DisposableHelper.setOnce(this, s);
+        public void onSubscribe(Disposable d) {
+            DisposableHelper.setOnce(this, d);
         }
 
         @Override
         public void onNext(T t) {
             if (won) {
-                actual.onNext(t);
+                downstream.onNext(t);
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onNext(t);
+                    downstream.onNext(t);
                 } else {
                     get().dispose();
                 }
@@ -174,13 +174,12 @@ public final class ObservableAmb<T> extends Observable<T> {
         @Override
         public void onError(Throwable t) {
             if (won) {
-                actual.onError(t);
+                downstream.onError(t);
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onError(t);
+                    downstream.onError(t);
                 } else {
-                    get().dispose();
                     RxJavaPlugins.onError(t);
                 }
             }
@@ -189,25 +188,17 @@ public final class ObservableAmb<T> extends Observable<T> {
         @Override
         public void onComplete() {
             if (won) {
-                actual.onComplete();
+                downstream.onComplete();
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onComplete();
-                } else {
-                    get().dispose();
+                    downstream.onComplete();
                 }
             }
         }
 
-        @Override
         public void dispose() {
             DisposableHelper.dispose(this);
-        }
-
-        @Override
-        public boolean isDisposed() {
-            return get() == DisposableHelper.DISPOSED;
         }
     }
 }

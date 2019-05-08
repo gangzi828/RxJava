@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -35,26 +35,26 @@ public final class ObservableGenerate<T, S> extends Observable<T> {
     }
 
     @Override
-    public void subscribeActual(Observer<? super T> s) {
+    public void subscribeActual(Observer<? super T> observer) {
         S state;
 
         try {
             state = stateSupplier.call();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            EmptyDisposable.error(e, s);
+            EmptyDisposable.error(e, observer);
             return;
         }
 
-        GeneratorDisposable<T, S> gd = new GeneratorDisposable<T, S>(s, generator, disposeState, state);
-        s.onSubscribe(gd);
+        GeneratorDisposable<T, S> gd = new GeneratorDisposable<T, S>(observer, generator, disposeState, state);
+        observer.onSubscribe(gd);
         gd.run();
     }
 
     static final class GeneratorDisposable<T, S>
     implements Emitter<T>, Disposable {
 
-        final Observer<? super T> actual;
+        final Observer<? super T> downstream;
         final BiFunction<S, ? super Emitter<T>, S> generator;
         final Consumer<? super S> disposeState;
 
@@ -64,10 +64,12 @@ public final class ObservableGenerate<T, S> extends Observable<T> {
 
         boolean terminate;
 
+        boolean hasNext;
+
         GeneratorDisposable(Observer<? super T> actual,
                 BiFunction<S, ? super Emitter<T>, S> generator,
                 Consumer<? super S> disposeState, S initialState) {
-            this.actual = actual;
+            this.downstream = actual;
             this.generator = generator;
             this.disposeState = disposeState;
             this.state = initialState;
@@ -92,13 +94,16 @@ public final class ObservableGenerate<T, S> extends Observable<T> {
                     return;
                 }
 
+                hasNext = false;
+
                 try {
                     s = f.apply(s, this);
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
                     state = null;
                     cancelled = true;
-                    actual.onError(ex);
+                    onError(ex);
+                    dispose(s);
                     return;
                 }
 
@@ -133,26 +138,39 @@ public final class ObservableGenerate<T, S> extends Observable<T> {
 
         @Override
         public void onNext(T t) {
-            if (t == null) {
-                onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
-                return;
+            if (!terminate) {
+                if (hasNext) {
+                    onError(new IllegalStateException("onNext already called in this generate turn"));
+                } else {
+                    if (t == null) {
+                        onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
+                    } else {
+                        hasNext = true;
+                        downstream.onNext(t);
+                    }
+                }
             }
-            actual.onNext(t);
         }
 
         @Override
         public void onError(Throwable t) {
-            if (t == null) {
-                t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
+            if (terminate) {
+                RxJavaPlugins.onError(t);
+            } else {
+                if (t == null) {
+                    t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
+                }
+                terminate = true;
+                downstream.onError(t);
             }
-            terminate = true;
-            actual.onError(t);
         }
 
         @Override
         public void onComplete() {
-            terminate = true;
-            actual.onComplete();
+            if (!terminate) {
+                terminate = true;
+                downstream.onComplete();
+            }
         }
     }
 }

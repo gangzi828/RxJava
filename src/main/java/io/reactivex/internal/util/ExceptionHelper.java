@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.util;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.exceptions.CompositeException;
@@ -49,15 +50,7 @@ public final class ExceptionHelper {
      * A singleton instance of a Throwable indicating a terminal state for exceptions,
      * don't leak this.
      */
-    public static final Throwable TERMINATED = new Throwable("No further exceptions") {
-
-        private static final long serialVersionUID = -4649703670690200604L;
-
-        @Override
-        public Throwable fillInStackTrace() {
-            return this;
-        }
-    };
+    public static final Throwable TERMINATED = new Termination();
 
     public static <T> boolean addThrowable(AtomicReference<Throwable> field, Throwable exception) {
         for (;;) {
@@ -112,5 +105,42 @@ public final class ExceptionHelper {
         }
 
         return list;
+    }
+
+    /**
+     * Workaround for Java 6 not supporting throwing a final Throwable from a catch block.
+     * @param <E> the generic exception type
+     * @param e the Throwable error to return or throw
+     * @return the Throwable e if it is a subclass of Exception
+     * @throws E the generic exception thrown
+     */
+    @SuppressWarnings("unchecked")
+    public static <E extends Throwable> Exception throwIfThrowable(Throwable e) throws E {
+        if (e instanceof Exception) {
+            return (Exception)e;
+        }
+        throw (E)e;
+    }
+
+    public static String timeoutMessage(long timeout, TimeUnit unit) {
+        return "The source did not signal an event for "
+                + timeout
+                + " "
+                + unit.toString().toLowerCase()
+                + " and has been terminated.";
+    }
+
+    static final class Termination extends Throwable {
+
+        private static final long serialVersionUID = -4649703670690200604L;
+
+        Termination() {
+            super("No further exceptions");
+        }
+
+        @Override
+        public Throwable fillInStackTrace() {
+            return this;
+        }
     }
 }

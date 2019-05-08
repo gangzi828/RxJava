@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -58,7 +58,7 @@ public final class FlowableGenerate<T, S> extends Flowable<T> {
 
         private static final long serialVersionUID = 7565982551505011832L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final BiFunction<S, ? super Emitter<T>, S> generator;
         final Consumer<? super S> disposeState;
 
@@ -68,10 +68,12 @@ public final class FlowableGenerate<T, S> extends Flowable<T> {
 
         boolean terminate;
 
+        boolean hasNext;
+
         GeneratorSubscription(Subscriber<? super T> actual,
                 BiFunction<S, ? super Emitter<T>, S> generator,
                 Consumer<? super S> disposeState, S initialState) {
-            this.actual = actual;
+            this.downstream = actual;
             this.generator = generator;
             this.disposeState = disposeState;
             this.state = initialState;
@@ -93,59 +95,45 @@ public final class FlowableGenerate<T, S> extends Flowable<T> {
             final BiFunction<S, ? super Emitter<T>, S> f = generator;
 
             for (;;) {
-                if (cancelled) {
-                    dispose(s);
-                    return;
-                }
-
-                boolean unbounded = n == Long.MAX_VALUE; // NOPMD
-
-                while (n != 0L) {
+                while (e != n) {
 
                     if (cancelled) {
+                        state = null;
                         dispose(s);
                         return;
                     }
+
+                    hasNext = false;
 
                     try {
                         s = f.apply(s, this);
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
                         cancelled = true;
-                        actual.onError(ex);
+                        state = null;
+                        onError(ex);
+                        dispose(s);
                         return;
                     }
 
                     if (terminate) {
                         cancelled = true;
+                        state = null;
                         dispose(s);
                         return;
                     }
 
-                    n--;
-                    e--;
+                    e++;
                 }
 
-                if (!unbounded) {
-                    n = get();
-                    if (n == Long.MAX_VALUE) {
-                        continue;
+                n = get();
+                if (e == n) {
+                    state = s;
+                    n = addAndGet(-e);
+                    if (n == 0L) {
+                        break;
                     }
-                    n += e;
-                    if (n != 0L) {
-                        continue; // keep draining and delay the addAndGet as much as possible
-                    }
-                }
-                if (e != 0L) {
-                    if (!unbounded) {
-                        state = s; // save state in case we run out of requests
-                        n = addAndGet(e);
-                        e = 0L;
-                    }
-                }
-
-                if (n == 0L) {
-                    break;
+                    e = 0L;
                 }
             }
         }
@@ -166,33 +154,48 @@ public final class FlowableGenerate<T, S> extends Flowable<T> {
 
                 // if there are no running requests, just dispose the state
                 if (BackpressureHelper.add(this, 1) == 0) {
-                    dispose(state);
+                    S s = state;
+                    state = null;
+                    dispose(s);
                 }
             }
         }
 
         @Override
         public void onNext(T t) {
-            if (t == null) {
-                onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
-                return;
+            if (!terminate) {
+                if (hasNext) {
+                    onError(new IllegalStateException("onNext already called in this generate turn"));
+                } else {
+                    if (t == null) {
+                        onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
+                    } else {
+                        hasNext = true;
+                        downstream.onNext(t);
+                    }
+                }
             }
-            actual.onNext(t);
         }
 
         @Override
         public void onError(Throwable t) {
-            if (t == null) {
-                t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
+            if (terminate) {
+                RxJavaPlugins.onError(t);
+            } else {
+                if (t == null) {
+                    t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
+                }
+                terminate = true;
+                downstream.onError(t);
             }
-            terminate = true;
-            actual.onError(t);
         }
 
         @Override
         public void onComplete() {
-            terminate = true;
-            actual.onComplete();
+            if (!terminate) {
+                terminate = true;
+                downstream.onComplete();
+            }
         }
     }
 }

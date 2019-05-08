@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import org.junit.Test;
@@ -20,7 +21,10 @@ import org.mockito.InOrder;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
-import io.reactivex.functions.Predicate;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.processors.PublishProcessor;
 
 public class FlowableSkipWhileTest {
 
@@ -117,16 +121,39 @@ public class FlowableSkipWhileTest {
         Flowable<Integer> src = Flowable.range(1, 10).skipWhile(LESS_THAN_FIVE);
         int n = 5;
         for (int i = 0; i < n; i++) {
-            Subscriber<Object> o = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(o);
+            Subscriber<Object> subscriber = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber);
 
-            src.subscribe(o);
+            src.subscribe(subscriber);
 
             for (int j = 5; j < 10; j++) {
-                inOrder.verify(o).onNext(j);
+                inOrder.verify(subscriber).onNext(j);
             }
-            inOrder.verify(o).onComplete();
-            verify(o, never()).onError(any(Throwable.class));
+            inOrder.verify(subscriber).onComplete();
+            verify(subscriber, never()).onError(any(Throwable.class));
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(PublishProcessor.create().skipWhile(Functions.alwaysFalse()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.skipWhile(Functions.alwaysFalse());
+            }
+        });
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .skipWhile(Functions.alwaysFalse())
+        .test()
+        .assertFailure(TestException.class);
     }
 }

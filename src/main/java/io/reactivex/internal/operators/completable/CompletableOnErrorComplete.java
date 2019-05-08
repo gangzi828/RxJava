@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -30,40 +30,47 @@ public final class CompletableOnErrorComplete extends Completable {
     }
 
     @Override
-    protected void subscribeActual(final CompletableObserver s) {
+    protected void subscribeActual(final CompletableObserver observer) {
 
-        source.subscribe(new CompletableObserver() {
-
-            @Override
-            public void onComplete() {
-                s.onComplete();
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                boolean b;
-
-                try {
-                    b = predicate.test(e);
-                } catch (Throwable ex) {
-                    Exceptions.throwIfFatal(ex);
-                    s.onError(new CompositeException(e, ex));
-                    return;
-                }
-
-                if (b) {
-                    s.onComplete();
-                } else {
-                    s.onError(e);
-                }
-            }
-
-            @Override
-            public void onSubscribe(Disposable d) {
-                s.onSubscribe(d);
-            }
-
-        });
+        source.subscribe(new OnError(observer));
     }
 
+    final class OnError implements CompletableObserver {
+
+        private final CompletableObserver downstream;
+
+        OnError(CompletableObserver observer) {
+            this.downstream = observer;
+        }
+
+        @Override
+        public void onComplete() {
+            downstream.onComplete();
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            boolean b;
+
+            try {
+                b = predicate.test(e);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                downstream.onError(new CompositeException(e, ex));
+                return;
+            }
+
+            if (b) {
+                downstream.onComplete();
+            } else {
+                downstream.onError(e);
+            }
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            downstream.onSubscribe(d);
+        }
+
+    }
 }

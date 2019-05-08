@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,12 +13,13 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import io.reactivex.Flowable;
-import io.reactivex.internal.fuseable.ConditionalSubscriber;
-import io.reactivex.internal.subscriptions.BasicQueueSubscription;
-import io.reactivex.internal.subscriptions.SubscriptionHelper;
-import io.reactivex.internal.util.BackpressureHelper;
 import org.reactivestreams.Subscriber;
+
+import io.reactivex.Flowable;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.internal.fuseable.ConditionalSubscriber;
+import io.reactivex.internal.subscriptions.*;
+import io.reactivex.internal.util.BackpressureHelper;
 
 /**
  * Emits a range of long values.
@@ -62,6 +63,7 @@ public final class FlowableRangeLong extends Flowable<Long> {
             return mode & SYNC;
         }
 
+        @Nullable
         @Override
         public final Long poll() {
             long i = index;
@@ -100,7 +102,6 @@ public final class FlowableRangeLong extends Flowable<Long> {
             cancelled = true;
         }
 
-
         abstract void fastPath();
 
         abstract void slowPath(long r);
@@ -110,17 +111,17 @@ public final class FlowableRangeLong extends Flowable<Long> {
 
         private static final long serialVersionUID = 2587302975077663557L;
 
-        final Subscriber<? super Long> actual;
+        final Subscriber<? super Long> downstream;
 
         RangeSubscription(Subscriber<? super Long> actual, long index, long end) {
             super(index, end);
-            this.actual = actual;
+            this.downstream = actual;
         }
 
         @Override
         void fastPath() {
             long f = end;
-            Subscriber<? super Long> a = actual;
+            Subscriber<? super Long> a = downstream;
 
             for (long i = index; i != f; i++) {
                 if (cancelled) {
@@ -139,7 +140,7 @@ public final class FlowableRangeLong extends Flowable<Long> {
             long e = 0;
             long f = end;
             long i = index;
-            Subscriber<? super Long> a = actual;
+            Subscriber<? super Long> a = downstream;
 
             for (;;) {
 
@@ -176,20 +177,19 @@ public final class FlowableRangeLong extends Flowable<Long> {
 
     static final class RangeConditionalSubscription extends BaseRangeSubscription {
 
-
         private static final long serialVersionUID = 2587302975077663557L;
 
-        final ConditionalSubscriber<? super Long> actual;
+        final ConditionalSubscriber<? super Long> downstream;
 
         RangeConditionalSubscription(ConditionalSubscriber<? super Long> actual, long index, long end) {
             super(index, end);
-            this.actual = actual;
+            this.downstream = actual;
         }
 
         @Override
         void fastPath() {
             long f = end;
-            ConditionalSubscriber<? super Long> a = actual;
+            ConditionalSubscriber<? super Long> a = downstream;
 
             for (long i = index; i != f; i++) {
                 if (cancelled) {
@@ -208,7 +208,7 @@ public final class FlowableRangeLong extends Flowable<Long> {
             long e = 0;
             long f = end;
             long i = index;
-            ConditionalSubscriber<? super Long> a = actual;
+            ConditionalSubscriber<? super Long> a = downstream;
 
             for (;;) {
 

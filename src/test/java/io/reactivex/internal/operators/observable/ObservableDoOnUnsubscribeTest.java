@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,6 +25,7 @@ import io.reactivex.Observable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.*;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.subjects.BehaviorSubject;
 
 public class ObservableDoOnUnsubscribeTest {
 
@@ -151,5 +152,25 @@ public class ObservableDoOnUnsubscribeTest {
         lowerLatch.await();
         assertEquals("There should exactly 1 un-subscription events for upper stream", 1, upperCount.get());
         assertEquals("There should exactly 1 un-subscription events for lower stream", 1, lowerCount.get());
+    }
+
+    @Test
+    public void noReentrantDispose() {
+
+        final AtomicInteger disposeCalled = new AtomicInteger();
+
+        final BehaviorSubject<Integer> s = BehaviorSubject.create();
+        s.doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                disposeCalled.incrementAndGet();
+                s.onNext(2);
+            }
+        })
+        .firstOrError()
+        .subscribe()
+        .dispose();
+
+        assertEquals(1, disposeCalled.get());
     }
 }

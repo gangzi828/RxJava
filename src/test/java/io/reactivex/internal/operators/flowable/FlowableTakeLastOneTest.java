@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,7 +20,8 @@ import java.util.concurrent.atomic.*;
 
 import org.junit.Test;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.subscribers.*;
 
@@ -90,7 +91,7 @@ public class FlowableTakeLastOneTest {
     public void testTakeLastZeroProcessesAllItemsButIgnoresThem() {
         final AtomicInteger upstreamCount = new AtomicInteger();
         final int num = 10;
-        long count = Flowable.range(1,num).doOnNext(new Consumer<Integer>() {
+        long count = Flowable.range(1, num).doOnNext(new Consumer<Integer>() {
 
             @Override
             public void accept(Integer t) {
@@ -117,7 +118,9 @@ public class FlowableTakeLastOneTest {
 
         @Override
         public void onStart() {
-            request(initialRequest);
+            if (initialRequest > 0) {
+                request(initialRequest);
+            }
         }
 
         @Override
@@ -137,4 +140,26 @@ public class FlowableTakeLastOneTest {
 
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.just(1).takeLast(1));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.takeLast(1);
+            }
+        });
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .takeLast(1)
+        .test()
+        .assertFailure(TestException.class);
+    }
 }

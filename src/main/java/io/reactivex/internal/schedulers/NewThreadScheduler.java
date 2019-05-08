@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,16 +17,19 @@
 package io.reactivex.internal.schedulers;
 
 import io.reactivex.Scheduler;
+import io.reactivex.annotations.NonNull;
+
+import java.util.concurrent.ThreadFactory;
 
 /**
  * Schedules work on a new thread.
  */
 public final class NewThreadScheduler extends Scheduler {
 
+    final ThreadFactory threadFactory;
+
     private static final String THREAD_NAME_PREFIX = "RxNewThreadScheduler";
     private static final RxThreadFactory THREAD_FACTORY;
-
-    private static final NewThreadScheduler INSTANCE = new NewThreadScheduler();
 
     /** The name of the system property for setting the thread priority for this Scheduler. */
     private static final String KEY_NEWTHREAD_PRIORITY = "rx2.newthread-priority";
@@ -38,16 +41,17 @@ public final class NewThreadScheduler extends Scheduler {
         THREAD_FACTORY = new RxThreadFactory(THREAD_NAME_PREFIX, priority);
     }
 
-    public static NewThreadScheduler instance() {
-        return INSTANCE;
+    public NewThreadScheduler() {
+        this(THREAD_FACTORY);
     }
 
-    private NewThreadScheduler() {
-
+    public NewThreadScheduler(ThreadFactory threadFactory) {
+        this.threadFactory = threadFactory;
     }
 
+    @NonNull
     @Override
     public Worker createWorker() {
-        return new NewThreadWorker(THREAD_FACTORY);
+        return new NewThreadWorker(threadFactory);
     }
 }

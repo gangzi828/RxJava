@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,29 +13,24 @@
 
 package io.reactivex.internal.operators.observable;
 
-import java.util.*;
+import java.util.Collection;
 import java.util.concurrent.Callable;
 
-import io.reactivex.ObservableSource;
-import io.reactivex.Observer;
+import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.functions.*;
 
 public final class ObservableToList<T, U extends Collection<? super T>>
 extends AbstractObservableWithUpstream<T, U> {
 
     final Callable<U> collectionSupplier;
 
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public ObservableToList(ObservableSource<T> source, final int defaultCapacityHint) {
         super(source);
-        this.collectionSupplier = new Callable<U>() {
-            @Override
-            @SuppressWarnings("unchecked")
-            public U call() throws Exception {
-                return (U)new ArrayList<T>(defaultCapacityHint);
-            }
-        };
+        this.collectionSupplier = (Callable)Functions.createArrayList(defaultCapacityHint);
     }
 
     public ObservableToList(ObservableSource<T> source, Callable<U> collectionSupplier) {
@@ -47,7 +42,7 @@ extends AbstractObservableWithUpstream<T, U> {
     public void subscribeActual(Observer<? super U> t) {
         U coll;
         try {
-            coll = collectionSupplier.call();
+            coll = ObjectHelper.requireNonNull(collectionSupplier.call(), "The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             EmptyDisposable.error(e, t);
@@ -57,35 +52,34 @@ extends AbstractObservableWithUpstream<T, U> {
     }
 
     static final class ToListObserver<T, U extends Collection<? super T>> implements Observer<T>, Disposable {
-        U collection;
-        final Observer<? super U> actual;
+        final Observer<? super U> downstream;
 
-        Disposable s;
+        Disposable upstream;
+
+        U collection;
 
         ToListObserver(Observer<? super U> actual, U collection) {
-            this.actual = actual;
+            this.downstream = actual;
             this.collection = collection;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -95,15 +89,15 @@ extends AbstractObservableWithUpstream<T, U> {
         @Override
         public void onError(Throwable t) {
             collection = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             U c = collection;
             collection = null;
-            actual.onNext(c);
-            actual.onComplete();
+            downstream.onNext(c);
+            downstream.onComplete();
         }
     }
 }

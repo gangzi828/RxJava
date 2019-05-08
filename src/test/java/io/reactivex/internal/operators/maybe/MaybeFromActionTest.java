@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.maybe;
 
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 import java.util.List;
 import java.util.concurrent.*;
@@ -135,7 +136,7 @@ public class MaybeFromActionTest {
                 @Override
                 public void run() throws Exception {
                     cdl1.countDown();
-                    cdl2.await();
+                    cdl2.await(5, TimeUnit.SECONDS);
                 }
             }).subscribeOn(Schedulers.single()).test();
 
@@ -143,17 +144,42 @@ public class MaybeFromActionTest {
 
             to.cancel();
 
-            cdl2.countDown();
-
             int timeout = 10;
 
             while (timeout-- > 0 && errors.isEmpty()) {
                 Thread.sleep(100);
             }
 
-            TestHelper.assertError(errors, 0, InterruptedException.class);
+            TestHelper.assertUndeliverable(errors, 0, InterruptedException.class);
         } finally {
             RxJavaPlugins.reset();
         }
+    }
+
+    @Test
+    public void disposedUpfront() throws Exception {
+        Action run = mock(Action.class);
+
+        Maybe.fromAction(run)
+        .test(true)
+        .assertEmpty();
+
+        verify(run, never()).run();
+    }
+
+    @Test
+    public void cancelWhileRunning() {
+        final TestObserver<Object> to = new TestObserver<Object>();
+
+        Maybe.fromAction(new Action() {
+            @Override
+            public void run() throws Exception {
+                to.dispose();
+            }
+        })
+        .subscribeWith(to)
+        .assertEmpty();
+
+        assertTrue(to.isDisposed());
     }
 }

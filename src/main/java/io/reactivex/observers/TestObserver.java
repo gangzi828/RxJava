@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,8 +18,8 @@ import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Consumer;
 import io.reactivex.internal.disposables.DisposableHelper;
-import io.reactivex.internal.fuseable.QueueDisposable;
-import io.reactivex.internal.util.*;
+import io.reactivex.internal.fuseable.*;
+import io.reactivex.internal.util.ExceptionHelper;
 
 /**
  * An Observer that records events and allows making assertions about them.
@@ -35,12 +35,12 @@ public class TestObserver<T>
 extends BaseTestConsumer<T, TestObserver<T>>
 implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, CompletableObserver {
     /** The actual observer to forward events to. */
-    private final Observer<? super T> actual;
+    private final Observer<? super T> downstream;
 
     /** Holds the current subscription if any. */
-    private final AtomicReference<Disposable> subscription = new AtomicReference<Disposable>();
+    private final AtomicReference<Disposable> upstream = new AtomicReference<Disposable>();
 
-    private QueueDisposable<T> qs;
+    private QueueDisposable<T> qd;
 
     /**
      * Constructs a non-forwarding TestObserver.
@@ -70,34 +70,34 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
 
     /**
      * Constructs a forwarding TestObserver.
-     * @param actual the actual Observer to forward events to
+     * @param downstream the actual Observer to forward events to
      */
-    public TestObserver(Observer<? super T> actual) {
-        this.actual = actual;
+    public TestObserver(Observer<? super T> downstream) {
+        this.downstream = downstream;
     }
 
     @SuppressWarnings("unchecked")
     @Override
-    public void onSubscribe(Disposable s) {
+    public void onSubscribe(Disposable d) {
         lastThread = Thread.currentThread();
 
-        if (s == null) {
+        if (d == null) {
             errors.add(new NullPointerException("onSubscribe received a null Subscription"));
             return;
         }
-        if (!subscription.compareAndSet(null, s)) {
-            s.dispose();
-            if (subscription.get() != DisposableHelper.DISPOSED) {
-                errors.add(new IllegalStateException("onSubscribe received multiple subscriptions: " + s));
+        if (!upstream.compareAndSet(null, d)) {
+            d.dispose();
+            if (upstream.get() != DisposableHelper.DISPOSED) {
+                errors.add(new IllegalStateException("onSubscribe received multiple subscriptions: " + d));
             }
             return;
         }
 
         if (initialFusionMode != 0) {
-            if (s instanceof QueueDisposable) {
-                qs = (QueueDisposable<T>)s;
+            if (d instanceof QueueDisposable) {
+                qd = (QueueDisposable<T>)d;
 
-                int m = qs.requestFusion(initialFusionMode);
+                int m = qd.requestFusion(initialFusionMode);
                 establishedFusionMode = m;
 
                 if (m == QueueDisposable.SYNC) {
@@ -105,12 +105,12 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
                     lastThread = Thread.currentThread();
                     try {
                         T t;
-                        while ((t = qs.poll()) != null) {
+                        while ((t = qd.poll()) != null) {
                             values.add(t);
                         }
                         completions++;
 
-                        subscription.lazySet(DisposableHelper.DISPOSED);
+                        upstream.lazySet(DisposableHelper.DISPOSED);
                     } catch (Throwable ex) {
                         // Exceptions.throwIfFatal(e); TODO add fatal exceptions?
                         errors.add(ex);
@@ -120,14 +120,14 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
             }
         }
 
-        actual.onSubscribe(s);
+        downstream.onSubscribe(d);
     }
 
     @Override
     public void onNext(T t) {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new IllegalStateException("onSubscribe not called in proper order"));
             }
         }
@@ -136,12 +136,13 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
 
         if (establishedFusionMode == QueueDisposable.ASYNC) {
             try {
-                while ((t = qs.poll()) != null) {
+                while ((t = qd.poll()) != null) {
                     values.add(t);
                 }
             } catch (Throwable ex) {
                 // Exceptions.throwIfFatal(e); TODO add fatal exceptions?
                 errors.add(ex);
+                qd.dispose();
             }
             return;
         }
@@ -149,17 +150,17 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
         values.add(t);
 
         if (t == null) {
-            errors.add(new NullPointerException("onNext received a null Subscription"));
+            errors.add(new NullPointerException("onNext received a null value"));
         }
 
-        actual.onNext(t);
+        downstream.onNext(t);
     }
 
     @Override
     public void onError(Throwable t) {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new IllegalStateException("onSubscribe not called in proper order"));
             }
         }
@@ -172,9 +173,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
                 errors.add(t);
             }
 
-            actual.onError(t);
-
-            subscription.lazySet(DisposableHelper.DISPOSED);
+            downstream.onError(t);
         } finally {
             done.countDown();
         }
@@ -184,7 +183,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
     public void onComplete() {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new IllegalStateException("onSubscribe not called in proper order"));
             }
         }
@@ -193,9 +192,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
             lastThread = Thread.currentThread();
             completions++;
 
-            actual.onComplete();
-
-            subscription.lazySet(DisposableHelper.DISPOSED);
+            downstream.onComplete();
         } finally {
             done.countDown();
         }
@@ -220,12 +217,12 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
 
     @Override
     public final void dispose() {
-        DisposableHelper.dispose(subscription);
+        DisposableHelper.dispose(upstream);
     }
 
     @Override
     public final boolean isDisposed() {
-        return DisposableHelper.isDisposed(subscription.get());
+        return DisposableHelper.isDisposed(upstream.get());
     }
 
     // state retrieval methods
@@ -234,7 +231,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
      * @return true if this TestObserver received a subscription
      */
     public final boolean hasSubscription() {
-        return subscription.get() != null;
+        return upstream.get() != null;
     }
 
     /**
@@ -243,7 +240,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
      */
     @Override
     public final TestObserver<T> assertSubscribed() {
-        if (subscription.get() == null) {
+        if (upstream.get() == null) {
             throw fail("Not subscribed!");
         }
         return this;
@@ -255,7 +252,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
      */
     @Override
     public final TestObserver<T> assertNotSubscribed() {
-        if (subscription.get() != null) {
+        if (upstream.get() != null) {
             throw fail("Subscribed!");
         } else
         if (!errors.isEmpty()) {
@@ -300,7 +297,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
     final TestObserver<T> assertFusionMode(int mode) {
         int m = establishedFusionMode;
         if (m != mode) {
-            if (qs != null) {
+            if (qd != null) {
                 throw new AssertionError("Fusion mode different. Expected: " + fusionModeToString(mode)
                 + ", actual: " + fusionModeToString(m));
             } else {
@@ -312,9 +309,9 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
 
     static String fusionModeToString(int mode) {
         switch (mode) {
-        case QueueDisposable.NONE : return "NONE";
-        case QueueDisposable.SYNC : return "SYNC";
-        case QueueDisposable.ASYNC : return "ASYNC";
+        case QueueFuseable.NONE : return "NONE";
+        case QueueFuseable.SYNC : return "SYNC";
+        case QueueFuseable.ASYNC : return "ASYNC";
         default: return "Unknown(" + mode + ")";
         }
     }
@@ -326,7 +323,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
      * @return this
      */
     final TestObserver<T> assertFuseable() {
-        if (qs == null) {
+        if (qd == null) {
             throw new AssertionError("Upstream is not fuseable.");
         }
         return this;
@@ -339,7 +336,7 @@ implements Observer<T>, Disposable, MaybeObserver<T>, SingleObserver<T>, Complet
      * @return this
      */
     final TestObserver<T> assertNotFuseable() {
-        if (qs != null) {
+        if (qd != null) {
             throw new AssertionError("Upstream is fuseable.");
         }
         return this;

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,45 +13,51 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.util.concurrent.TimeUnit;
+import java.util.List;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.*;
 import org.mockito.*;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
-import io.reactivex.exceptions.TestException;
+import io.reactivex.exceptions.*;
 import io.reactivex.flowables.ConnectableFlowable;
-import io.reactivex.schedulers.TestScheduler;
+import io.reactivex.functions.Function;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.*;
 import io.reactivex.subscribers.*;
 
 public class FlowableTimerTest {
     @Mock
-    Subscriber<Object> observer;
+    Subscriber<Object> subscriber;
     @Mock
-    Subscriber<Long> observer2;
+    Subscriber<Long> subscriber2;
 
     TestScheduler scheduler;
 
     @Before
     public void before() {
-        observer = TestHelper.mockSubscriber();
+        subscriber = TestHelper.mockSubscriber();
 
-        observer2 = TestHelper.mockSubscriber();
+        subscriber2 = TestHelper.mockSubscriber();
 
         scheduler = new TestScheduler();
     }
 
     @Test
     public void testTimerOnce() {
-        Flowable.timer(100, TimeUnit.MILLISECONDS, scheduler).subscribe(observer);
+        Flowable.timer(100, TimeUnit.MILLISECONDS, scheduler).subscribe(subscriber);
         scheduler.advanceTimeBy(100, TimeUnit.MILLISECONDS);
 
-        verify(observer, times(1)).onNext(0L);
-        verify(observer, times(1)).onComplete();
-        verify(observer, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onNext(0L);
+        verify(subscriber, times(1)).onComplete();
+        verify(subscriber, never()).onError(any(Throwable.class));
     }
 
     @Test
@@ -80,6 +86,7 @@ public class FlowableTimerTest {
         ts.assertNotComplete();
         ts.assertNoErrors();
     }
+
     @Test
     public void testInterval() {
         Flowable<Long> w = Flowable.interval(1, TimeUnit.SECONDS, scheduler);
@@ -220,6 +227,7 @@ public class FlowableTimerTest {
         ts2.assertNoErrors();
         ts2.assertNotComplete();
     }
+
     @Test
     public void testOnceObserverThrows() {
         Flowable<Long> source = Flowable.timer(100, TimeUnit.MILLISECONDS, scheduler);
@@ -233,26 +241,27 @@ public class FlowableTimerTest {
 
             @Override
             public void onError(Throwable e) {
-                observer.onError(e);
+                subscriber.onError(e);
             }
 
             @Override
             public void onComplete() {
-                observer.onComplete();
+                subscriber.onComplete();
             }
         });
 
         scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
 
-        verify(observer).onError(any(TestException.class));
-        verify(observer, never()).onNext(anyLong());
-        verify(observer, never()).onComplete();
+        verify(subscriber).onError(any(TestException.class));
+        verify(subscriber, never()).onNext(anyLong());
+        verify(subscriber, never()).onComplete();
     }
+
     @Test
     public void testPeriodicObserverThrows() {
         Flowable<Long> source = Flowable.interval(100, 100, TimeUnit.MILLISECONDS, scheduler);
 
-        InOrder inOrder = inOrder(observer);
+        InOrder inOrder = inOrder(subscriber);
 
         source.safeSubscribe(new DefaultSubscriber<Long>() {
 
@@ -261,25 +270,113 @@ public class FlowableTimerTest {
                 if (t > 0) {
                     throw new TestException();
                 }
-                observer.onNext(t);
+                subscriber.onNext(t);
             }
 
             @Override
             public void onError(Throwable e) {
-                observer.onError(e);
+                subscriber.onError(e);
             }
 
             @Override
             public void onComplete() {
-                observer.onComplete();
+                subscriber.onComplete();
             }
         });
 
         scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
 
-        inOrder.verify(observer).onNext(0L);
-        inOrder.verify(observer).onError(any(TestException.class));
+        inOrder.verify(subscriber).onNext(0L);
+        inOrder.verify(subscriber).onError(any(TestException.class));
         inOrder.verifyNoMoreInteractions();
-        verify(observer, never()).onComplete();
+        verify(subscriber, never()).onComplete();
+    }
+
+    @Test
+    public void disposed() {
+        TestHelper.checkDisposed(Flowable.timer(1, TimeUnit.DAYS));
+    }
+
+    @Test
+    public void backpressureNotReady() {
+        Flowable.timer(1, TimeUnit.MILLISECONDS)
+        .test(0L)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(MissingBackpressureException.class);
+    }
+
+    @Test
+    public void timerCancelRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final TestSubscriber<Long> ts = new TestSubscriber<Long>();
+
+            final TestScheduler scheduler = new TestScheduler();
+
+            Flowable.timer(1, TimeUnit.SECONDS, scheduler)
+            .subscribe(ts);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    ts.cancel();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void timerDelayZero() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            for (int i = 0; i < 1000; i++) {
+                Flowable.timer(0, TimeUnit.MILLISECONDS).blockingFirst();
+            }
+
+            assertTrue(errors.toString(), errors.isEmpty());
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void timerInterruptible() throws Exception {
+        ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor();
+        try {
+            for (Scheduler s : new Scheduler[] { Schedulers.single(), Schedulers.computation(), Schedulers.newThread(), Schedulers.io(), Schedulers.from(exec) }) {
+                final AtomicBoolean interrupted = new AtomicBoolean();
+                TestSubscriber<Long> ts = Flowable.timer(1, TimeUnit.MILLISECONDS, s)
+                .map(new Function<Long, Long>() {
+                    @Override
+                    public Long apply(Long v) throws Exception {
+                        try {
+                        Thread.sleep(3000);
+                        } catch (InterruptedException ex) {
+                            interrupted.set(true);
+                        }
+                        return v;
+                    }
+                })
+                .test();
+
+                Thread.sleep(500);
+
+                ts.cancel();
+
+                Thread.sleep(500);
+
+                assertTrue(s.getClass().getSimpleName(), interrupted.get());
+            }
+        } finally {
+            exec.shutdown();
+        }
     }
 }

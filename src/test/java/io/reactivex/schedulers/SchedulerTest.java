@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import static org.junit.Assert.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.annotations.NonNull;
 import org.junit.Test;
 
 import io.reactivex.*;
@@ -181,7 +182,7 @@ public class SchedulerTest {
     public void periodicDirectTaskRace() {
         final TestScheduler scheduler = new TestScheduler();
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final Disposable d = scheduler.schedulePeriodicallyDirect(Functions.EMPTY_RUNNABLE, 1, 1, TimeUnit.MILLISECONDS);
 
             Runnable r1 = new Runnable() {
@@ -198,11 +199,10 @@ public class SchedulerTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.io());
+            TestHelper.race(r1, r2);
         }
 
     }
-
 
     @Test
     public void periodicDirectTaskRaceIO() throws Exception {
@@ -233,7 +233,7 @@ public class SchedulerTest {
             Thread.sleep(250);
 
             assertEquals(1, list.size());
-            TestHelper.assertError(list, 0, TestException.class, null);
+            TestHelper.assertUndeliverable(list, 0, TestException.class, null);
 
         } finally {
             RxJavaPlugins.reset();
@@ -248,11 +248,13 @@ public class SchedulerTest {
     @Test
     public void defaultSchedulePeriodicallyDirectRejects() {
         Scheduler s = new Scheduler() {
+            @NonNull
             @Override
             public Worker createWorker() {
                 return new Worker() {
+                    @NonNull
                     @Override
-                    public Disposable schedule(Runnable run, long delay, TimeUnit unit) {
+                    public Disposable schedule(@NonNull Runnable run, long delay, @NonNull TimeUnit unit) {
                         return EmptyDisposable.INSTANCE;
                     }
 
@@ -270,5 +272,100 @@ public class SchedulerTest {
         };
 
         assertSame(EmptyDisposable.INSTANCE, s.schedulePeriodicallyDirect(Functions.EMPTY_RUNNABLE, 1, 1, TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    public void holders() {
+        assertNotNull(new Schedulers.ComputationHolder());
+
+        assertNotNull(new Schedulers.IoHolder());
+
+        assertNotNull(new Schedulers.NewThreadHolder());
+
+        assertNotNull(new Schedulers.SingleHolder());
+    }
+
+    static final class CustomScheduler extends Scheduler {
+
+        @Override
+        public Worker createWorker() {
+            return Schedulers.single().createWorker();
+        }
+
+    }
+
+    @Test
+    public void customScheduleDirectDisposed() {
+        CustomScheduler scheduler = new CustomScheduler();
+
+        Disposable d = scheduler.scheduleDirect(Functions.EMPTY_RUNNABLE, 1, TimeUnit.MINUTES);
+
+        assertFalse(d.isDisposed());
+
+        d.dispose();
+
+        assertTrue(d.isDisposed());
+    }
+
+    @Test
+    public void unwrapDefaultPeriodicTask() {
+        TestScheduler scheduler = new TestScheduler();
+
+        Runnable runnable = new Runnable() {
+            @Override
+            public void run() {
+            }
+        };
+        SchedulerRunnableIntrospection wrapper = (SchedulerRunnableIntrospection) scheduler.schedulePeriodicallyDirect(runnable, 100, 100, TimeUnit.MILLISECONDS);
+
+        assertSame(runnable, wrapper.getWrappedRunnable());
+    }
+
+    @Test
+    public void unwrapScheduleDirectTask() {
+        TestScheduler scheduler = new TestScheduler();
+
+        Runnable runnable = new Runnable() {
+            @Override
+            public void run() {
+            }
+        };
+        SchedulerRunnableIntrospection wrapper = (SchedulerRunnableIntrospection) scheduler.scheduleDirect(runnable, 100, TimeUnit.MILLISECONDS);
+        assertSame(runnable, wrapper.getWrappedRunnable());
+    }
+
+    @Test
+    public void unwrapWorkerPeriodicTask() {
+        final Runnable runnable = new Runnable() {
+            @Override
+            public void run() {
+            }
+        };
+
+        Scheduler scheduler = new Scheduler() {
+            @Override
+            public Worker createWorker() {
+                return new Worker() {
+                    @Override
+                    public Disposable schedule(Runnable run, long delay, TimeUnit unit) {
+                        SchedulerRunnableIntrospection outerWrapper = (SchedulerRunnableIntrospection) run;
+                        SchedulerRunnableIntrospection innerWrapper = (SchedulerRunnableIntrospection) outerWrapper.getWrappedRunnable();
+                        assertSame(runnable, innerWrapper.getWrappedRunnable());
+                        return (Disposable) innerWrapper;
+                    }
+
+                    @Override
+                    public void dispose() {
+                    }
+
+                    @Override
+                    public boolean isDisposed() {
+                        return false;
+                    }
+                };
+            }
+        };
+
+        scheduler.schedulePeriodicallyDirect(runnable, 100, 100, TimeUnit.MILLISECONDS);
     }
 }

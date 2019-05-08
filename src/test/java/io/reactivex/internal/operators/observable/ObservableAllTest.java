@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,16 +14,21 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
 import io.reactivex.*;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public class ObservableAllTest {
 
@@ -119,6 +124,7 @@ public class ObservableAllTest {
 
         assertFalse(allOdd.blockingFirst());
     }
+
     @Test(timeout = 5000)
     public void testIssue1935NoUnsubscribeDownstreamObservable() {
         Observable<Integer> source = Observable.just(1)
@@ -138,10 +144,9 @@ public class ObservableAllTest {
         assertEquals((Object)2, source.blockingFirst());
     }
 
-
     @Test
     public void testPredicateThrowsExceptionAndValueInCauseMessageObservable() {
-        TestObserver<Boolean> ts = new TestObserver<Boolean>();
+        TestObserver<Boolean> to = new TestObserver<Boolean>();
 
         final IllegalArgumentException ex = new IllegalArgumentException();
 
@@ -151,16 +156,15 @@ public class ObservableAllTest {
                 throw ex;
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.assertTerminated();
-        ts.assertNoValues();
-        ts.assertNotComplete();
-        ts.assertError(ex);
+        to.assertTerminated();
+        to.assertNoValues();
+        to.assertNotComplete();
+        to.assertError(ex);
         // FIXME need to decide about adding the value that probably caused the crash in some way
 //        assertTrue(ex.getCause().getMessage().contains("Boo!"));
     }
-
 
     @Test
     public void testAll() {
@@ -251,6 +255,7 @@ public class ObservableAllTest {
 
         assertFalse(allOdd.blockingGet());
     }
+
     @Test(timeout = 5000)
     public void testIssue1935NoUnsubscribeDownstream() {
         Observable<Integer> source = Observable.just(1)
@@ -270,10 +275,9 @@ public class ObservableAllTest {
         assertEquals((Object)2, source.blockingFirst());
     }
 
-
     @Test
     public void testPredicateThrowsExceptionAndValueInCauseMessage() {
-        TestObserver<Boolean> ts = new TestObserver<Boolean>();
+        TestObserver<Boolean> to = new TestObserver<Boolean>();
 
         final IllegalArgumentException ex = new IllegalArgumentException();
 
@@ -283,14 +287,81 @@ public class ObservableAllTest {
                 throw ex;
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.assertTerminated();
-        ts.assertNoValues();
-        ts.assertNotComplete();
-        ts.assertError(ex);
+        to.assertTerminated();
+        to.assertNoValues();
+        to.assertNotComplete();
+        to.assertError(ex);
         // FIXME need to decide about adding the value that probably caused the crash in some way
 //        assertTrue(ex.getCause().getMessage().contains("Boo!"));
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).all(Functions.alwaysTrue()).toObservable());
+
+        TestHelper.checkDisposed(Observable.just(1).all(Functions.alwaysTrue()));
+    }
+
+    @Test
+    public void predicateThrowsObservable() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+
+                    observer.onNext(1);
+                    observer.onNext(2);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .all(new Predicate<Integer>() {
+                @Override
+                public boolean test(Integer v) throws Exception {
+                    throw new TestException();
+                }
+            })
+            .toObservable()
+            .test()
+            .assertFailure(TestException.class);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void predicateThrows() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+
+                    observer.onNext(1);
+                    observer.onNext(2);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .all(new Predicate<Integer>() {
+                @Override
+                public boolean test(Integer v) throws Exception {
+                    throw new TestException();
+                }
+            })
+            .test()
+            .assertFailure(TestException.class);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
 }

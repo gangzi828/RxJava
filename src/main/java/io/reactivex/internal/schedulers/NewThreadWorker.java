@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,8 @@ package io.reactivex.internal.schedulers;
 import java.util.concurrent.*;
 
 import io.reactivex.Scheduler;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.*;
 import io.reactivex.internal.disposables.*;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -34,13 +36,15 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
         executor = SchedulerPoolFactory.create(threadFactory);
     }
 
+    @NonNull
     @Override
-    public Disposable schedule(final Runnable run) {
+    public Disposable schedule(@NonNull final Runnable run) {
         return schedule(run, 0, null);
     }
 
+    @NonNull
     @Override
-    public Disposable schedule(final Runnable action, long delayTime, TimeUnit unit) {
+    public Disposable schedule(@NonNull final Runnable action, long delayTime, @NonNull TimeUnit unit) {
         if (disposed) {
             return EmptyDisposable.INSTANCE;
         }
@@ -56,15 +60,16 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
      * @return the ScheduledRunnable instance
      */
     public Disposable scheduleDirect(final Runnable run, long delayTime, TimeUnit unit) {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+        ScheduledDirectTask task = new ScheduledDirectTask(RxJavaPlugins.onSchedule(run));
         try {
             Future<?> f;
-            if (delayTime <= 0) {
-                f = executor.submit(decoratedRun);
+            if (delayTime <= 0L) {
+                f = executor.submit(task);
             } else {
-                f = executor.schedule(decoratedRun, delayTime, unit);
+                f = executor.schedule(task, delayTime, unit);
             }
-            return Disposables.fromFuture(f);
+            task.setFuture(f);
+            return task;
         } catch (RejectedExecutionException ex) {
             RxJavaPlugins.onError(ex);
             return EmptyDisposable.INSTANCE;
@@ -80,17 +85,36 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
      * @param unit the time unit for both the initialDelay and period
      * @return the ScheduledRunnable instance
      */
-    public Disposable schedulePeriodicallyDirect(final Runnable run, long initialDelay, long period, TimeUnit unit) {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+    public Disposable schedulePeriodicallyDirect(Runnable run, long initialDelay, long period, TimeUnit unit) {
+        final Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+        if (period <= 0L) {
+
+            InstantPeriodicTask periodicWrapper = new InstantPeriodicTask(decoratedRun, executor);
+            try {
+                Future<?> f;
+                if (initialDelay <= 0L) {
+                    f = executor.submit(periodicWrapper);
+                } else {
+                    f = executor.schedule(periodicWrapper, initialDelay, unit);
+                }
+                periodicWrapper.setFirst(f);
+            } catch (RejectedExecutionException ex) {
+                RxJavaPlugins.onError(ex);
+                return EmptyDisposable.INSTANCE;
+            }
+
+            return periodicWrapper;
+        }
+        ScheduledDirectPeriodicTask task = new ScheduledDirectPeriodicTask(decoratedRun);
         try {
-            Future<?> f = executor.scheduleAtFixedRate(decoratedRun, initialDelay, period, unit);
-            return Disposables.fromFuture(f);
+            Future<?> f = executor.scheduleAtFixedRate(task, initialDelay, period, unit);
+            task.setFuture(f);
+            return task;
         } catch (RejectedExecutionException ex) {
             RxJavaPlugins.onError(ex);
             return EmptyDisposable.INSTANCE;
         }
     }
-
 
     /**
      * Wraps the given runnable into a ScheduledRunnable and schedules it
@@ -103,7 +127,8 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
      * @param parent the optional tracker parent to add the created ScheduledRunnable instance to before it gets scheduled
      * @return the ScheduledRunnable instance
      */
-    public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, DisposableContainer parent) {
+    @NonNull
+    public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, @NonNull TimeUnit unit, @Nullable DisposableContainer parent) {
         Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 
         ScheduledRunnable sr = new ScheduledRunnable(decoratedRun, parent);
@@ -123,6 +148,9 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
             }
             sr.setFuture(f);
         } catch (RejectedExecutionException ex) {
+            if (parent != null) {
+                parent.remove(sr);
+            }
             RxJavaPlugins.onError(ex);
         }
 
@@ -134,6 +162,16 @@ public class NewThreadWorker extends Scheduler.Worker implements Disposable {
         if (!disposed) {
             disposed = true;
             executor.shutdownNow();
+        }
+    }
+
+    /**
+     * Shuts down the underlying executor in a non-interrupting fashion.
+     */
+    public void shutdown() {
+        if (!disposed) {
+            disposed = true;
+            executor.shutdown();
         }
     }
 

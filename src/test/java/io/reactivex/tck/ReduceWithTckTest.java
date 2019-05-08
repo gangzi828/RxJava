@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,7 +25,7 @@ public class ReduceWithTckTest extends BaseTck<Integer> {
 
     @Override
     public Publisher<Integer> createPublisher(final long elements) {
-        return FlowableTck.wrap(
+        return
                 Flowable.range(1, 1000).reduceWith(Functions.justCallable(0),
                 new BiFunction<Integer, Integer, Integer>() {
                     @Override
@@ -33,7 +33,7 @@ public class ReduceWithTckTest extends BaseTck<Integer> {
                         return a + b;
                     }
                 }).toFlowable()
-            );
+            ;
     }
 
     @Override

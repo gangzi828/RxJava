@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,13 +54,13 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
     }
 
     @Override
-    protected void subscribeActual(Observer<? super R> s) {
+    protected void subscribeActual(Observer<? super R> observer) {
 
-        GroupJoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R> parent =
-                new GroupJoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R>(
-                        s, leftEnd, rightEnd, resultSelector);
+        JoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R> parent =
+                new JoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R>(
+                        observer, leftEnd, rightEnd, resultSelector);
 
-        s.onSubscribe(parent);
+        observer.onSubscribe(parent);
 
         LeftRightObserver left = new LeftRightObserver(parent, true);
         parent.disposables.add(left);
@@ -71,13 +71,12 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
         other.subscribe(right);
     }
 
-    static final class GroupJoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R>
+    static final class JoinDisposable<TLeft, TRight, TLeftEnd, TRightEnd, R>
     extends AtomicInteger implements Disposable, JoinSupport {
-
 
         private static final long serialVersionUID = -6071216598687999801L;
 
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
 
         final SpscLinkedArrayQueue<Object> queue;
 
@@ -111,11 +110,11 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 
         static final Integer RIGHT_CLOSE = 4;
 
-        GroupJoinDisposable(Observer<? super R> actual,
+        JoinDisposable(Observer<? super R> actual,
                 Function<? super TLeft, ? extends ObservableSource<TLeftEnd>> leftEnd,
                 Function<? super TRight, ? extends ObservableSource<TRightEnd>> rightEnd,
                         BiFunction<? super TLeft, ? super TRight, ? extends R> resultSelector) {
-            this.actual = actual;
+            this.downstream = actual;
             this.disposables = new CompositeDisposable();
             this.queue = new SpscLinkedArrayQueue<Object>(bufferSize());
             this.lefts = new LinkedHashMap<Integer, TLeft>();
@@ -129,13 +128,12 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 
         @Override
         public void dispose() {
-            if (cancelled) {
-                return;
-            }
-            cancelled = true;
-            cancelAll();
-            if (getAndIncrement() == 0) {
-                queue.clear();
+            if (!cancelled) {
+                cancelled = true;
+                cancelAll();
+                if (getAndIncrement() == 0) {
+                    queue.clear();
+                }
             }
         }
 
@@ -172,7 +170,7 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 
             int missed = 1;
             SpscLinkedArrayQueue<Object> q = queue;
-            Observer<? super R> a = actual;
+            Observer<? super R> a = downstream;
 
             for (;;) {
                 for (;;) {
@@ -303,8 +301,7 @@ public final class ObservableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends
 
                         lefts.remove(end.index);
                         disposables.remove(end);
-                    }
-                    else if (mode == RIGHT_CLOSE) {
+                    } else {
                         LeftRightEndObserver end = (LeftRightEndObserver)val;
 
                         rights.remove(end.index);

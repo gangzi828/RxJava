@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,7 +25,7 @@ public class GenerateTckTest extends BaseTck<Long> {
 
     @Override
     public Publisher<Long> createPublisher(final long elements) {
-        return FlowableTck.wrap(
+        return
             Flowable.generate(Functions.justCallable(0L),
             new BiFunction<Long, Emitter<Long>, Long>() {
                 @Override
@@ -37,6 +37,6 @@ public class GenerateTckTest extends BaseTck<Long> {
                     return s;
                 }
             }, Functions.<Long>emptyConsumer())
-        );
+        ;
     }
 }

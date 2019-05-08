@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,28 +28,28 @@ import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableCollectSingle<T, U> extends Single<U> implements FuseToFlowable<U> {
 
-    final Publisher<T> source;
+    final Flowable<T> source;
 
     final Callable<? extends U> initialSupplier;
     final BiConsumer<? super U, ? super T> collector;
 
-    public FlowableCollectSingle(Publisher<T> source, Callable<? extends U> initialSupplier, BiConsumer<? super U, ? super T> collector) {
+    public FlowableCollectSingle(Flowable<T> source, Callable<? extends U> initialSupplier, BiConsumer<? super U, ? super T> collector) {
         this.source = source;
         this.initialSupplier = initialSupplier;
         this.collector = collector;
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super U> s) {
+    protected void subscribeActual(SingleObserver<? super U> observer) {
         U u;
         try {
             u = ObjectHelper.requireNonNull(initialSupplier.call(), "The initialSupplier returned a null value");
         } catch (Throwable e) {
-            EmptyDisposable.error(e, s);
+            EmptyDisposable.error(e, observer);
             return;
         }
 
-        source.subscribe(new CollectSubscriber<T, U>(s, u, collector));
+        source.subscribe(new CollectSubscriber<T, U>(observer, u, collector));
     }
 
     @Override
@@ -57,29 +57,29 @@ public final class FlowableCollectSingle<T, U> extends Single<U> implements Fuse
         return RxJavaPlugins.onAssembly(new FlowableCollect<T, U>(source, initialSupplier, collector));
     }
 
-    static final class CollectSubscriber<T, U> implements Subscriber<T>, Disposable {
+    static final class CollectSubscriber<T, U> implements FlowableSubscriber<T>, Disposable {
 
-        final SingleObserver<? super U> actual;
+        final SingleObserver<? super U> downstream;
 
         final BiConsumer<? super U, ? super T> collector;
 
         final U u;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         CollectSubscriber(SingleObserver<? super U> actual, U u, BiConsumer<? super U, ? super T> collector) {
-            this.actual = actual;
+            this.downstream = actual;
             this.collector = collector;
             this.u = u;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -93,7 +93,7 @@ public final class FlowableCollectSingle<T, U> extends Single<U> implements Fuse
                 collector.accept(u, t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
+                upstream.cancel();
                 onError(e);
             }
         }
@@ -105,8 +105,8 @@ public final class FlowableCollectSingle<T, U> extends Single<U> implements Fuse
                 return;
             }
             done = true;
-            s = SubscriptionHelper.CANCELLED;
-            actual.onError(t);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onError(t);
         }
 
         @Override
@@ -115,19 +115,19 @@ public final class FlowableCollectSingle<T, U> extends Single<U> implements Fuse
                 return;
             }
             done = true;
-            s = SubscriptionHelper.CANCELLED;
-            actual.onSuccess(u);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onSuccess(u);
         }
 
         @Override
         public void dispose() {
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public boolean isDisposed() {
-            return s == SubscriptionHelper.CANCELLED;
+            return upstream == SubscriptionHelper.CANCELLED;
         }
     }
 }

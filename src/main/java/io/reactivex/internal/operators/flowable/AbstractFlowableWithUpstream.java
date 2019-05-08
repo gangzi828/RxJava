@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -31,14 +31,14 @@ abstract class AbstractFlowableWithUpstream<T, R> extends Flowable<R> implements
     /**
      * The upstream source Publisher.
      */
-    protected final Publisher<T> source;
+    protected final Flowable<T> source;
 
     /**
      * Constructs a FlowableSource wrapping the given non-null (verified)
      * source Publisher.
      * @param source the source (upstream) Publisher instance, not null (verified)
      */
-    AbstractFlowableWithUpstream(Publisher<T> source) {
+    AbstractFlowableWithUpstream(Flowable<T> source) {
         this.source = ObjectHelper.requireNonNull(source, "source is null");
     }
 

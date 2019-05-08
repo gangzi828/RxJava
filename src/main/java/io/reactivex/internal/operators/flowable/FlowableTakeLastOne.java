@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,11 +14,12 @@ package io.reactivex.internal.operators.flowable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.internal.subscriptions.*;
 
 public final class FlowableTakeLastOne<T> extends AbstractFlowableWithUpstream<T, T> {
 
-    public FlowableTakeLastOne(Publisher<T> source) {
+    public FlowableTakeLastOne(Flowable<T> source) {
         super(source);
     }
 
@@ -28,21 +29,21 @@ public final class FlowableTakeLastOne<T> extends AbstractFlowableWithUpstream<T
     }
 
     static final class TakeLastOneSubscriber<T> extends DeferredScalarSubscription<T>
-    implements Subscriber<T> {
+    implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -5467847744262967226L;
 
-        Subscription s;
+        Subscription upstream;
 
-        TakeLastOneSubscriber(Subscriber<? super T> actual) {
-            super(actual);
+        TakeLastOneSubscriber(Subscriber<? super T> downstream) {
+            super(downstream);
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -55,7 +56,7 @@ public final class FlowableTakeLastOne<T> extends AbstractFlowableWithUpstream<T
         @Override
         public void onError(Throwable t) {
             value = null;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -64,14 +65,14 @@ public final class FlowableTakeLastOne<T> extends AbstractFlowableWithUpstream<T
             if (v != null) {
                 complete(v);
             } else {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -21,50 +21,70 @@ import io.reactivex.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 
+/**
+ * Subscribes to the source Flowable on the specified Scheduler and makes
+ * sure downstream requests are scheduled there as well.
+ *
+ * @param <T> the value type emitted
+ */
 public final class FlowableSubscribeOn<T> extends AbstractFlowableWithUpstream<T , T> {
+
     final Scheduler scheduler;
 
-    public FlowableSubscribeOn(Publisher<T> source, Scheduler scheduler) {
+    final boolean nonScheduledRequests;
+
+    public FlowableSubscribeOn(Flowable<T> source, Scheduler scheduler, boolean nonScheduledRequests) {
         super(source);
         this.scheduler = scheduler;
+        this.nonScheduledRequests = nonScheduledRequests;
     }
 
     @Override
     public void subscribeActual(final Subscriber<? super T> s) {
         Scheduler.Worker w = scheduler.createWorker();
-        final SubscribeOnSubscriber<T> sos = new SubscribeOnSubscriber<T>(s, w);
+        final SubscribeOnSubscriber<T> sos = new SubscribeOnSubscriber<T>(s, w, source, nonScheduledRequests);
         s.onSubscribe(sos);
 
-        w.schedule(new Runnable() {
-            @Override
-            public void run() {
-                sos.lazySet(Thread.currentThread());
-                source.subscribe(sos);
-            }
-        });
+        w.schedule(sos);
     }
 
     static final class SubscribeOnSubscriber<T> extends AtomicReference<Thread>
-    implements Subscriber<T>, Subscription {
+    implements FlowableSubscriber<T>, Subscription, Runnable {
 
         private static final long serialVersionUID = 8094547886072529208L;
-        final Subscriber<? super T> actual;
+
+        final Subscriber<? super T> downstream;
+
         final Scheduler.Worker worker;
 
-        final AtomicReference<Subscription> s;
+        final AtomicReference<Subscription> upstream;
 
         final AtomicLong requested;
 
-        SubscribeOnSubscriber(Subscriber<? super T> actual, Scheduler.Worker worker) {
-            this.actual = actual;
+        final boolean nonScheduledRequests;
+
+        Publisher<T> source;
+
+        SubscribeOnSubscriber(Subscriber<? super T> actual, Scheduler.Worker worker, Publisher<T> source, boolean requestOn) {
+            this.downstream = actual;
             this.worker = worker;
-            this.s = new AtomicReference<Subscription>();
+            this.source = source;
+            this.upstream = new AtomicReference<Subscription>();
             this.requested = new AtomicLong();
+            this.nonScheduledRequests = !requestOn;
+        }
+
+        @Override
+        public void run() {
+            lazySet(Thread.currentThread());
+            Publisher<T> src = source;
+            source = null;
+            src.subscribe(this);
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this.s, s)) {
+            if (SubscriptionHelper.setOnce(this.upstream, s)) {
                 long r = requested.getAndSet(0L);
                 if (r != 0L) {
                     requestUpstream(r, s);
@@ -74,65 +94,67 @@ public final class FlowableSubscribeOn<T> extends AbstractFlowableWithUpstream<T
 
         @Override
         public void onNext(T t) {
-            actual.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
         public void onError(Throwable t) {
-            try {
-                actual.onError(t);
-            } finally {
-                worker.dispose();
-            }
+            downstream.onError(t);
+            worker.dispose();
         }
 
         @Override
         public void onComplete() {
-            try {
-                actual.onComplete();
-            } finally {
-                worker.dispose();
-            }
+            downstream.onComplete();
+            worker.dispose();
         }
 
         @Override
         public void request(final long n) {
-            if (!SubscriptionHelper.validate(n)) {
-                return;
-            }
-            Subscription s = this.s.get();
-            if (s != null) {
-                requestUpstream(n, s);
-            } else {
-                BackpressureHelper.add(requested, n);
-                s = this.s.get();
+            if (SubscriptionHelper.validate(n)) {
+                Subscription s = this.upstream.get();
                 if (s != null) {
-                    long r = requested.getAndSet(0L);
-                    if (r != 0L) {
-                        requestUpstream(r, s);
+                    requestUpstream(n, s);
+                } else {
+                    BackpressureHelper.add(requested, n);
+                    s = this.upstream.get();
+                    if (s != null) {
+                        long r = requested.getAndSet(0L);
+                        if (r != 0L) {
+                            requestUpstream(r, s);
+                        }
                     }
                 }
-
             }
         }
 
         void requestUpstream(final long n, final Subscription s) {
-            if (Thread.currentThread() == get()) {
+            if (nonScheduledRequests || Thread.currentThread() == get()) {
                 s.request(n);
             } else {
-                worker.schedule(new Runnable() {
-                    @Override
-                    public void run() {
-                        s.request(n);
-                    }
-                });
+                worker.schedule(new Request(s, n));
             }
         }
 
         @Override
         public void cancel() {
-            SubscriptionHelper.cancel(s);
+            SubscriptionHelper.cancel(upstream);
             worker.dispose();
+        }
+
+        static final class Request implements Runnable {
+            final Subscription upstream;
+            final long n;
+
+            Request(Subscription s, long n) {
+                this.upstream = s;
+                this.n = n;
+            }
+
+            @Override
+            public void run() {
+                upstream.request(n);
+            }
         }
     }
 }

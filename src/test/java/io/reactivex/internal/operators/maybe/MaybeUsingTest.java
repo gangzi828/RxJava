@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -26,7 +26,6 @@ import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.PublishSubject;
 
 public class MaybeUsingTest {
@@ -242,7 +241,7 @@ public class MaybeUsingTest {
             .test()
             .assertFailureAndMessage(TestException.class, "Main");
 
-            TestHelper.assertError(errors, 0, TestException.class, "Disposer");
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Disposer");
         } finally {
             RxJavaPlugins.reset();
         }
@@ -299,7 +298,7 @@ public class MaybeUsingTest {
 
             to.cancel();
 
-            TestHelper.assertError(errors, 0, TestException.class);
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -346,7 +345,6 @@ public class MaybeUsingTest {
         .test()
         .assertFailure(TestException.class);
     }
-
 
     @Test
     public void emptyDisposerCrashes() {
@@ -411,14 +409,14 @@ public class MaybeUsingTest {
                 public MaybeSource<Integer> apply(Object v) throws Exception {
                     return Maybe.wrap(new MaybeSource<Integer>() {
                         @Override
-                        public void subscribe(MaybeObserver<? super Integer> s) {
+                        public void subscribe(MaybeObserver<? super Integer> observer) {
                             Disposable d1 = Disposables.empty();
 
-                            s.onSubscribe(d1);
+                            observer.onSubscribe(d1);
 
                             Disposable d2 = Disposables.empty();
 
-                            s.onSubscribe(d2);
+                            observer.onSubscribe(d2);
 
                             assertFalse(d1.isDisposed());
 
@@ -440,7 +438,7 @@ public class MaybeUsingTest {
 
     @Test
     public void successDisposeRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
 
             final PublishSubject<Integer> ps = PublishSubject.create();
 
@@ -477,13 +475,13 @@ public class MaybeUsingTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
     @Test
     public void errorDisposeRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
 
             final PublishSubject<Integer> ps = PublishSubject.create();
 
@@ -520,13 +518,13 @@ public class MaybeUsingTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
     @Test
     public void emptyDisposeRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
 
             final PublishSubject<Integer> ps = PublishSubject.create();
 
@@ -562,7 +560,7 @@ public class MaybeUsingTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 }

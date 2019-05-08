@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import org.junit.*;
 import org.mockito.InOrder;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Function;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.*;
@@ -121,4 +122,28 @@ public class ObservableTimeIntervalTest {
         }
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).timeInterval());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .timeInterval()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, Observable<Timed<Object>>>() {
+            @Override
+            public Observable<Timed<Object>> apply(Observable<Object> f)
+                    throws Exception {
+                return f.timeInterval();
+            }
+        });
+    }
 }

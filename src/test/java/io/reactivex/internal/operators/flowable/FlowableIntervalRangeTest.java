@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.MissingBackpressureException;
 import io.reactivex.schedulers.Schedulers;
 
 public class FlowableIntervalRangeTest {
@@ -72,5 +73,48 @@ public class FlowableIntervalRangeTest {
         } catch (IllegalArgumentException ex) {
             assertEquals("Overflow! start + count is bigger than Long.MAX_VALUE", ex.getMessage());
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.intervalRange(1, 2, 1, 1, TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    public void backpressureBounded() {
+        Flowable.intervalRange(1, 2, 1, 1, TimeUnit.MILLISECONDS)
+        .test(2L)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1L, 2L);
+    }
+
+    @Test
+    public void backpressureOverflow() {
+        Flowable.intervalRange(1, 3, 1, 1, TimeUnit.MILLISECONDS)
+        .test(2L)
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(MissingBackpressureException.class, 1L, 2L);
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.intervalRange(1, 3, 1, 1, TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    public void take() {
+        Flowable.intervalRange(1, 2, 1, 1, TimeUnit.MILLISECONDS)
+        .take(1)
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertResult(1L);
+    }
+
+    @Test(timeout = 2000)
+    public void cancel() {
+        Flowable.intervalRange(0, 20, 1, 1, TimeUnit.MILLISECONDS, Schedulers.trampoline())
+        .take(10)
+        .test()
+        .assertResult(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L);
     }
 }

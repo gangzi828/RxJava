@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,6 +23,7 @@ import io.reactivex.*;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.internal.util.EndConsumerHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
 public class ResourceSubscriberTest {
@@ -163,15 +164,15 @@ public class ResourceSubscriberTest {
 
             tc.onSubscribe(new BooleanSubscription());
 
-            BooleanSubscription d = new BooleanSubscription();
+            BooleanSubscription bs = new BooleanSubscription();
 
-            tc.onSubscribe(d);
+            tc.onSubscribe(bs);
 
-            assertTrue(d.isCancelled());
+            assertTrue(bs.isCancelled());
 
             assertEquals(1, tc.start);
 
-            TestHelper.assertError(error, 0, IllegalStateException.class, "Subscription already set!");
+            TestHelper.assertError(error, 0, IllegalStateException.class, EndConsumerHelper.composeMessage(tc.getClass().getName()));
         } finally {
             RxJavaPlugins.reset();
         }
@@ -182,11 +183,11 @@ public class ResourceSubscriberTest {
         TestResourceSubscriber<Integer> tc = new TestResourceSubscriber<Integer>();
         tc.dispose();
 
-        BooleanSubscription d = new BooleanSubscription();
+        BooleanSubscription bs = new BooleanSubscription();
 
-        tc.onSubscribe(d);
+        tc.onSubscribe(bs);
 
-        assertTrue(d.isCancelled());
+        assertTrue(bs.isCancelled());
 
         assertEquals(0, tc.start);
     }
@@ -213,5 +214,43 @@ public class ResourceSubscriberTest {
         assertEquals(1, tc.values.get(0).intValue());
         assertTrue(tc.errors.isEmpty());
         assertEquals(1, tc.complete);
+    }
+
+    static final class RequestEarly extends ResourceSubscriber<Integer> {
+
+        final List<Object> events = new ArrayList<Object>();
+
+        RequestEarly() {
+            request(5);
+        }
+
+        @Override
+        protected void onStart() {
+        }
+
+        @Override
+        public void onNext(Integer t) {
+            events.add(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            events.add(t);
+        }
+
+        @Override
+        public void onComplete() {
+            events.add("Done");
+        }
+
+    }
+
+    @Test
+    public void requestUpfront() {
+        RequestEarly sub = new RequestEarly();
+
+        Flowable.range(1, 10).subscribe(sub);
+
+        assertEquals(Arrays.<Object>asList(1, 2, 3, 4, 5), sub.events);
     }
 }

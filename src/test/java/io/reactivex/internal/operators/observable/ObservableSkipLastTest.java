@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.Arrays;
@@ -22,6 +23,8 @@ import org.junit.*;
 import org.mockito.InOrder;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Function;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.schedulers.Schedulers;
 
@@ -93,11 +96,11 @@ public class ObservableSkipLastTest {
     @Test
     public void testSkipLastWithBackpressure() {
         Observable<Integer> o = Observable.range(0, Flowable.bufferSize() * 2).skipLast(Flowable.bufferSize() + 10);
-        TestObserver<Integer> ts = new TestObserver<Integer>();
-        o.observeOn(Schedulers.computation()).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
-        assertEquals((Flowable.bufferSize()) - 10, ts.valueCount());
+        TestObserver<Integer> to = new TestObserver<Integer>();
+        o.observeOn(Schedulers.computation()).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
+        assertEquals((Flowable.bufferSize()) - 10, to.valueCount());
 
     }
 
@@ -106,4 +109,27 @@ public class ObservableSkipLastTest {
         Observable.just("one").skipLast(-1);
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).skipLast(1));
+    }
+
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .skipLast(1)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, Observable<Object>>() {
+            @Override
+            public Observable<Object> apply(Observable<Object> o)
+                    throws Exception {
+                return o.skipLast(1);
+            }
+        });
+    }
 }

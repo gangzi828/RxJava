@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,14 +13,21 @@
 
 package io.reactivex;
 
-import io.reactivex.functions.Function;
+import io.reactivex.annotations.*;
 
 /**
- * Interface to map/wrap a downstream subscriber to an upstream Observer.
+ * Interface to map/wrap a downstream observer to an upstream observer.
  *
  * @param <Downstream> the value type of the downstream
  * @param <Upstream> the value type of the upstream
  */
-public interface ObservableOperator<Downstream, Upstream> extends Function<Observer<? super Downstream>, Observer<? super Upstream>> {
-
+public interface ObservableOperator<Downstream, Upstream> {
+    /**
+     * Applies a function to the child Observer and returns a new parent Observer.
+     * @param observer the child Observer instance
+     * @return the parent Observer instance
+     * @throws Exception on failure
+     */
+    @NonNull
+    Observer<? super Upstream> apply(@NonNull Observer<? super Downstream> observer) throws Exception;
 }

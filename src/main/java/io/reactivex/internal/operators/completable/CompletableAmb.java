@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -31,7 +31,7 @@ public final class CompletableAmb extends Completable {
     }
 
     @Override
-    public void subscribeActual(final CompletableObserver s) {
+    public void subscribeActual(final CompletableObserver observer) {
         CompletableSource[] sources = this.sources;
         int count = 0;
         if (sources == null) {
@@ -39,7 +39,7 @@ public final class CompletableAmb extends Completable {
             try {
                 for (CompletableSource element : sourcesIterable) {
                     if (element == null) {
-                        EmptyDisposable.error(new NullPointerException("One of the sources is null"), s);
+                        EmptyDisposable.error(new NullPointerException("One of the sources is null"), observer);
                         return;
                     }
                     if (count == sources.length) {
@@ -48,10 +48,10 @@ public final class CompletableAmb extends Completable {
                         sources = b;
                     }
                     sources[count++] = element;
-                };
+                }
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                EmptyDisposable.error(e, s);
+                EmptyDisposable.error(e, observer);
                 return;
             }
         } else {
@@ -59,35 +59,9 @@ public final class CompletableAmb extends Completable {
         }
 
         final CompositeDisposable set = new CompositeDisposable();
-        s.onSubscribe(set);
+        observer.onSubscribe(set);
 
         final AtomicBoolean once = new AtomicBoolean();
-
-        CompletableObserver inner = new CompletableObserver() {
-            @Override
-            public void onComplete() {
-                if (once.compareAndSet(false, true)) {
-                    set.dispose();
-                    s.onComplete();
-                }
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                if (once.compareAndSet(false, true)) {
-                    set.dispose();
-                    s.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
-            }
-
-            @Override
-            public void onSubscribe(Disposable d) {
-                set.add(d);
-            }
-
-        };
 
         for (int i = 0; i < count; i++) {
             CompletableSource c = sources[i];
@@ -98,22 +72,62 @@ public final class CompletableAmb extends Completable {
                 NullPointerException npe = new NullPointerException("One of the sources is null");
                 if (once.compareAndSet(false, true)) {
                     set.dispose();
-                    s.onError(npe);
+                    observer.onError(npe);
                 } else {
                     RxJavaPlugins.onError(npe);
                 }
                 return;
             }
-            if (once.get() || set.isDisposed()) {
-                return;
-            }
 
             // no need to have separate subscribers because inner is stateless
-            c.subscribe(inner);
+            c.subscribe(new Amb(once, set, observer));
         }
 
         if (count == 0) {
-            s.onComplete();
+            observer.onComplete();
+        }
+    }
+
+    static final class Amb implements CompletableObserver {
+
+        final AtomicBoolean once;
+
+        final CompositeDisposable set;
+
+        final CompletableObserver downstream;
+
+        Disposable upstream;
+
+        Amb(AtomicBoolean once, CompositeDisposable set, CompletableObserver observer) {
+            this.once = once;
+            this.set = set;
+            this.downstream = observer;
+        }
+
+        @Override
+        public void onComplete() {
+            if (once.compareAndSet(false, true)) {
+                set.delete(upstream);
+                set.dispose();
+                downstream.onComplete();
+            }
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            if (once.compareAndSet(false, true)) {
+                set.delete(upstream);
+                set.dispose();
+                downstream.onError(e);
+            } else {
+                RxJavaPlugins.onError(e);
+            }
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            upstream = d;
+            set.add(d);
         }
     }
 }

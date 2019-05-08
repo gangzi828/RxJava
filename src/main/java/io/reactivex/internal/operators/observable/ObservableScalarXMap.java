@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,6 +17,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Function;
 import io.reactivex.internal.disposables.EmptyDisposable;
@@ -135,12 +136,12 @@ public final class ObservableScalarXMap {
 
         @SuppressWarnings("unchecked")
         @Override
-        public void subscribeActual(Observer<? super R> s) {
+        public void subscribeActual(Observer<? super R> observer) {
             ObservableSource<? extends R> other;
             try {
                 other = ObjectHelper.requireNonNull(mapper.apply(value), "The mapper returned a null ObservableSource");
             } catch (Throwable e) {
-                EmptyDisposable.error(e, s);
+                EmptyDisposable.error(e, observer);
                 return;
             }
             if (other instanceof Callable) {
@@ -150,19 +151,19 @@ public final class ObservableScalarXMap {
                     u = ((Callable<R>)other).call();
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    EmptyDisposable.error(ex, s);
+                    EmptyDisposable.error(ex, observer);
                     return;
                 }
 
                 if (u == null) {
-                    EmptyDisposable.complete(s);
+                    EmptyDisposable.complete(observer);
                     return;
                 }
-                ScalarDisposable<R> sd = new ScalarDisposable<R>(s, u);
-                s.onSubscribe(sd);
+                ScalarDisposable<R> sd = new ScalarDisposable<R>(observer, u);
+                observer.onSubscribe(sd);
                 sd.run();
             } else {
-                other.subscribe(s);
+                other.subscribe(observer);
             }
         }
     }
@@ -183,8 +184,9 @@ public final class ObservableScalarXMap {
         final T value;
 
         static final int START = 0;
-        static final int ON_NEXT = 1;
-        static final int ON_COMPLETE = 2;
+        static final int FUSED = 1;
+        static final int ON_NEXT = 2;
+        static final int ON_COMPLETE = 3;
 
         public ScalarDisposable(Observer<? super T> observer, T value) {
             this.observer = observer;
@@ -201,9 +203,10 @@ public final class ObservableScalarXMap {
             throw new UnsupportedOperationException("Should not be called!");
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
-            if (get() == START) {
+            if (get() == FUSED) {
                 lazySet(ON_COMPLETE);
                 return value;
             }
@@ -212,7 +215,7 @@ public final class ObservableScalarXMap {
 
         @Override
         public boolean isEmpty() {
-            return get() != START;
+            return get() != FUSED;
         }
 
         @Override
@@ -232,7 +235,11 @@ public final class ObservableScalarXMap {
 
         @Override
         public int requestFusion(int mode) {
-            return mode & SYNC;
+            if ((mode & SYNC) != 0) {
+                lazySet(FUSED);
+                return SYNC;
+            }
+            return NONE;
         }
 
         @Override

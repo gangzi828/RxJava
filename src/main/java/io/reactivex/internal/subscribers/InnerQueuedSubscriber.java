@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,8 +15,9 @@ package io.reactivex.internal.subscribers;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.reactivestreams.*;
+import org.reactivestreams.Subscription;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.QueueDrainHelper;
@@ -29,8 +30,7 @@ import io.reactivex.internal.util.QueueDrainHelper;
  */
 public final class InnerQueuedSubscriber<T>
 extends AtomicReference<Subscription>
-implements Subscriber<T>, Subscription {
-
+implements FlowableSubscriber<T>, Subscription {
 
     private static final long serialVersionUID = 22876611072430776L;
 
@@ -72,14 +72,14 @@ implements Subscriber<T>, Subscription {
                 if (m == QueueSubscription.ASYNC) {
                     fusionMode = m;
                     queue = qs;
-                    QueueDrainHelper.request(get(), prefetch);
+                    QueueDrainHelper.request(s, prefetch);
                     return;
                 }
             }
 
             queue = QueueDrainHelper.createQueue(prefetch);
 
-            QueueDrainHelper.request(get(), prefetch);
+            QueueDrainHelper.request(s, prefetch);
         }
     }
 
@@ -104,22 +104,26 @@ implements Subscriber<T>, Subscription {
 
     @Override
     public void request(long n) {
-        long p = produced + n;
-        if (p >= limit) {
-            produced = 0L;
-            get().request(p);
-        } else {
-            produced = p;
+        if (fusionMode != QueueSubscription.SYNC) {
+            long p = produced + n;
+            if (p >= limit) {
+                produced = 0L;
+                get().request(p);
+            } else {
+                produced = p;
+            }
         }
     }
 
     public void requestOne() {
-        long p = produced + 1;
-        if (p == limit) {
-            produced = 0L;
-            get().request(p);
-        } else {
-            produced = p;
+        if (fusionMode != QueueSubscription.SYNC) {
+            long p = produced + 1;
+            if (p == limit) {
+                produced = 0L;
+                get().request(p);
+            } else {
+                produced = p;
+            }
         }
     }
 
@@ -138,9 +142,5 @@ implements Subscriber<T>, Subscription {
 
     public SimpleQueue<T> queue() {
         return queue;
-    }
-
-    public int fusionMode() {
-        return fusionMode;
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,13 +17,15 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Scheduler;
+import io.reactivex.*;
 import io.reactivex.Scheduler.Worker;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.exceptions.*;
 import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.queue.SpscArrayQueue;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.internal.util.BackpressureHelper;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableObserveOn<T> extends AbstractFlowableWithUpstream<T, T> {
 final Scheduler scheduler;
@@ -33,7 +35,7 @@ final Scheduler scheduler;
     final int prefetch;
 
     public FlowableObserveOn(
-            Publisher<T> source,
+            Flowable<T> source,
             Scheduler scheduler,
             boolean delayError,
             int prefetch) {
@@ -48,16 +50,16 @@ final Scheduler scheduler;
         Worker worker = scheduler.createWorker();
 
         if (s instanceof ConditionalSubscriber) {
-            source.subscribe(new PublisherObserveOnConditionalSubscriber<T>(
+            source.subscribe(new ObserveOnConditionalSubscriber<T>(
                     (ConditionalSubscriber<? super T>) s, worker, delayError, prefetch));
         } else {
-            source.subscribe(new PublisherObserveOnSubscriber<T>(s, worker, delayError, prefetch));
+            source.subscribe(new ObserveOnSubscriber<T>(s, worker, delayError, prefetch));
         }
     }
 
     abstract static class BaseObserveOnSubscriber<T>
     extends BasicIntQueueSubscription<T>
-    implements Runnable, Subscriber<T> {
+    implements FlowableSubscriber<T>, Runnable {
         private static final long serialVersionUID = -8241002408341274697L;
 
         final Worker worker;
@@ -70,7 +72,7 @@ final Scheduler scheduler;
 
         final AtomicLong requested;
 
-        Subscription s;
+        Subscription upstream;
 
         SimpleQueue<T> queue;
 
@@ -99,12 +101,15 @@ final Scheduler scheduler;
 
         @Override
         public final void onNext(T t) {
+            if (done) {
+                return;
+            }
             if (sourceMode == ASYNC) {
                 trySchedule();
                 return;
             }
             if (!queue.offer(t)) {
-                s.cancel();
+                upstream.cancel();
 
                 error = new MissingBackpressureException("Queue is full?!");
                 done = true;
@@ -114,6 +119,10 @@ final Scheduler scheduler;
 
         @Override
         public final void onError(Throwable t) {
+            if (done) {
+                RxJavaPlugins.onError(t);
+                return;
+            }
             error = t;
             done = true;
             trySchedule();
@@ -121,8 +130,10 @@ final Scheduler scheduler;
 
         @Override
         public final void onComplete() {
-            done = true;
-            trySchedule();
+            if (!done) {
+                done = true;
+                trySchedule();
+            }
         }
 
         @Override
@@ -140,7 +151,7 @@ final Scheduler scheduler;
             }
 
             cancelled = true;
-            s.cancel();
+            upstream.cancel();
             worker.dispose();
 
             if (getAndIncrement() == 0) {
@@ -180,45 +191,35 @@ final Scheduler scheduler;
             if (d) {
                 if (delayError) {
                     if (empty) {
+                        cancelled = true;
                         Throwable e = error;
                         if (e != null) {
-                            doError(a, e);
+                            a.onError(e);
                         } else {
-                            doComplete(a);
+                            a.onComplete();
                         }
+                        worker.dispose();
                         return true;
                     }
                 } else {
                     Throwable e = error;
                     if (e != null) {
+                        cancelled = true;
                         clear();
-                        doError(a, e);
+                        a.onError(e);
+                        worker.dispose();
                         return true;
                     } else
                     if (empty) {
-                        doComplete(a);
+                        cancelled = true;
+                        a.onComplete();
+                        worker.dispose();
                         return true;
                     }
                 }
             }
 
             return false;
-        }
-
-        final void doComplete(Subscriber<?> a) {
-            try {
-                a.onComplete();
-            } finally {
-                worker.dispose();
-            }
-        }
-
-        final void doError(Subscriber<?> a, Throwable e) {
-            try {
-                a.onError(e);
-            } finally {
-                worker.dispose();
-            }
         }
 
         @Override
@@ -241,26 +242,26 @@ final Scheduler scheduler;
         }
     }
 
-    static final class PublisherObserveOnSubscriber<T> extends BaseObserveOnSubscriber<T>
-    implements Subscriber<T> {
+    static final class ObserveOnSubscriber<T> extends BaseObserveOnSubscriber<T>
+    implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -4547113800637756442L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
-        PublisherObserveOnSubscriber(
+        ObserveOnSubscriber(
                 Subscriber<? super T> actual,
                 Worker worker,
                 boolean delayError,
                 int prefetch) {
             super(worker, delayError, prefetch);
-            this.actual = actual;
+            this.downstream = actual;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
                 if (s instanceof QueueSubscription) {
                     @SuppressWarnings("unchecked")
@@ -273,14 +274,14 @@ final Scheduler scheduler;
                         queue = f;
                         done = true;
 
-                        actual.onSubscribe(this);
+                        downstream.onSubscribe(this);
                         return;
                     } else
                     if (m == ASYNC) {
                         sourceMode = ASYNC;
                         queue = f;
 
-                        actual.onSubscribe(this);
+                        downstream.onSubscribe(this);
 
                         s.request(prefetch);
 
@@ -290,7 +291,7 @@ final Scheduler scheduler;
 
                 queue = new SpscArrayQueue<T>(prefetch);
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(prefetch);
             }
@@ -300,7 +301,7 @@ final Scheduler scheduler;
         void runSync() {
             int missed = 1;
 
-            final Subscriber<? super T> a = actual;
+            final Subscriber<? super T> a = downstream;
             final SimpleQueue<T> q = queue;
 
             long e = produced;
@@ -316,7 +317,10 @@ final Scheduler scheduler;
                         v = q.poll();
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        doError(a, ex);
+                        cancelled = true;
+                        upstream.cancel();
+                        a.onError(ex);
+                        worker.dispose();
                         return;
                     }
 
@@ -324,7 +328,9 @@ final Scheduler scheduler;
                         return;
                     }
                     if (v == null) {
-                        doComplete(a);
+                        cancelled = true;
+                        a.onComplete();
+                        worker.dispose();
                         return;
                     }
 
@@ -333,15 +339,15 @@ final Scheduler scheduler;
                     e++;
                 }
 
-                if (e == r) {
-                    if (cancelled) {
-                        return;
-                    }
+                if (cancelled) {
+                    return;
+                }
 
-                    if (q.isEmpty()) {
-                        doComplete(a);
-                        return;
-                    }
+                if (q.isEmpty()) {
+                    cancelled = true;
+                    a.onComplete();
+                    worker.dispose();
+                    return;
                 }
 
                 int w = get();
@@ -361,7 +367,7 @@ final Scheduler scheduler;
         void runAsync() {
             int missed = 1;
 
-            final Subscriber<? super T> a = actual;
+            final Subscriber<? super T> a = downstream;
             final SimpleQueue<T> q = queue;
 
             long e = produced;
@@ -379,10 +385,12 @@ final Scheduler scheduler;
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
 
-                        s.cancel();
+                        cancelled = true;
+                        upstream.cancel();
                         q.clear();
 
-                        doError(a, ex);
+                        a.onError(ex);
+                        worker.dispose();
                         return;
                     }
 
@@ -403,7 +411,7 @@ final Scheduler scheduler;
                         if (r != Long.MAX_VALUE) {
                             r = requested.addAndGet(-e);
                         }
-                        s.request(e);
+                        upstream.request(e);
                         e = 0L;
                     }
                 }
@@ -437,15 +445,17 @@ final Scheduler scheduler;
 
                 boolean d = done;
 
-                actual.onNext(null);
+                downstream.onNext(null);
 
                 if (d) {
+                    cancelled = true;
                     Throwable e = error;
                     if (e != null) {
-                        doError(actual, e);
+                        downstream.onError(e);
                     } else {
-                        doComplete(actual);
+                        downstream.onComplete();
                     }
+                    worker.dispose();
                     return;
                 }
 
@@ -456,6 +466,7 @@ final Scheduler scheduler;
             }
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             T v = queue.poll();
@@ -463,7 +474,7 @@ final Scheduler scheduler;
                 long p = produced + 1;
                 if (p == limit) {
                     produced = 0;
-                    s.request(p);
+                    upstream.request(p);
                 } else {
                     produced = p;
                 }
@@ -473,28 +484,28 @@ final Scheduler scheduler;
 
     }
 
-    static final class PublisherObserveOnConditionalSubscriber<T>
+    static final class ObserveOnConditionalSubscriber<T>
     extends BaseObserveOnSubscriber<T> {
 
         private static final long serialVersionUID = 644624475404284533L;
 
-        final ConditionalSubscriber<? super T> actual;
+        final ConditionalSubscriber<? super T> downstream;
 
         long consumed;
 
-        PublisherObserveOnConditionalSubscriber(
+        ObserveOnConditionalSubscriber(
                 ConditionalSubscriber<? super T> actual,
                 Worker worker,
                 boolean delayError,
                 int prefetch) {
             super(worker, delayError, prefetch);
-            this.actual = actual;
+            this.downstream = actual;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
                 if (s instanceof QueueSubscription) {
                     @SuppressWarnings("unchecked")
@@ -507,14 +518,14 @@ final Scheduler scheduler;
                         queue = f;
                         done = true;
 
-                        actual.onSubscribe(this);
+                        downstream.onSubscribe(this);
                         return;
                     } else
                     if (m == ASYNC) {
                         sourceMode = ASYNC;
                         queue = f;
 
-                        actual.onSubscribe(this);
+                        downstream.onSubscribe(this);
 
                         s.request(prefetch);
 
@@ -524,7 +535,7 @@ final Scheduler scheduler;
 
                 queue = new SpscArrayQueue<T>(prefetch);
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(prefetch);
             }
@@ -534,7 +545,7 @@ final Scheduler scheduler;
         void runSync() {
             int missed = 1;
 
-            final ConditionalSubscriber<? super T> a = actual;
+            final ConditionalSubscriber<? super T> a = downstream;
             final SimpleQueue<T> q = queue;
 
             long e = produced;
@@ -549,7 +560,10 @@ final Scheduler scheduler;
                         v = q.poll();
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
-                        doError(a, ex);
+                        cancelled = true;
+                        upstream.cancel();
+                        a.onError(ex);
+                        worker.dispose();
                         return;
                     }
 
@@ -557,7 +571,9 @@ final Scheduler scheduler;
                         return;
                     }
                     if (v == null) {
-                        doComplete(a);
+                        cancelled = true;
+                        a.onComplete();
+                        worker.dispose();
                         return;
                     }
 
@@ -566,15 +582,15 @@ final Scheduler scheduler;
                     }
                 }
 
-                if (e == r) {
-                    if (cancelled) {
-                        return;
-                    }
+                if (cancelled) {
+                    return;
+                }
 
-                    if (q.isEmpty()) {
-                        doComplete(a);
-                        return;
-                    }
+                if (q.isEmpty()) {
+                    cancelled = true;
+                    a.onComplete();
+                    worker.dispose();
+                    return;
                 }
 
                 int w = get();
@@ -594,7 +610,7 @@ final Scheduler scheduler;
         void runAsync() {
             int missed = 1;
 
-            final ConditionalSubscriber<? super T> a = actual;
+            final ConditionalSubscriber<? super T> a = downstream;
             final SimpleQueue<T> q = queue;
 
             long emitted = produced;
@@ -612,10 +628,12 @@ final Scheduler scheduler;
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
 
-                        s.cancel();
+                        cancelled = true;
+                        upstream.cancel();
                         q.clear();
 
-                        doError(a, ex);
+                        a.onError(ex);
+                        worker.dispose();
                         return;
                     }
                     boolean empty = v == null;
@@ -635,7 +653,7 @@ final Scheduler scheduler;
                     polled++;
 
                     if (polled == limit) {
-                        s.request(polled);
+                        upstream.request(polled);
                         polled = 0L;
                     }
                 }
@@ -671,15 +689,17 @@ final Scheduler scheduler;
 
                 boolean d = done;
 
-                actual.onNext(null);
+                downstream.onNext(null);
 
                 if (d) {
+                    cancelled = true;
                     Throwable e = error;
                     if (e != null) {
-                        doError(actual, e);
+                        downstream.onError(e);
                     } else {
-                        doComplete(actual);
+                        downstream.onComplete();
                     }
+                    worker.dispose();
                     return;
                 }
 
@@ -690,6 +710,7 @@ final Scheduler scheduler;
             }
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             T v = queue.poll();
@@ -697,7 +718,7 @@ final Scheduler scheduler;
                 long p = consumed + 1;
                 if (p == limit) {
                     consumed = 0;
-                    s.request(p);
+                    upstream.request(p);
                 } else {
                     consumed = p;
                 }

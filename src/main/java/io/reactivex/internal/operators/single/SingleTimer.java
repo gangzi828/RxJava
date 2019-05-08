@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -36,24 +36,24 @@ public final class SingleTimer extends Single<Long> {
     }
 
     @Override
-    protected void subscribeActual(final SingleObserver<? super Long> s) {
-        TimerDisposable parent = new TimerDisposable(s);
-        s.onSubscribe(parent);
+    protected void subscribeActual(final SingleObserver<? super Long> observer) {
+        TimerDisposable parent = new TimerDisposable(observer);
+        observer.onSubscribe(parent);
         parent.setFuture(scheduler.scheduleDirect(parent, delay, unit));
     }
 
     static final class TimerDisposable extends AtomicReference<Disposable> implements Disposable, Runnable {
 
         private static final long serialVersionUID = 8465401857522493082L;
-        final SingleObserver<? super Long> actual;
+        final SingleObserver<? super Long> downstream;
 
-        TimerDisposable(final SingleObserver<? super Long> actual) {
-            this.actual = actual;
+        TimerDisposable(final SingleObserver<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void run() {
-            actual.onSuccess(0L);
+            downstream.onSuccess(0L);
         }
 
         @Override

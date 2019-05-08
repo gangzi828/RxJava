@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.BiPredicate;
 import io.reactivex.internal.subscriptions.SubscriptionArbiter;
@@ -24,7 +25,7 @@ import io.reactivex.internal.subscriptions.SubscriptionArbiter;
 public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstream<T, T> {
     final BiPredicate<? super Integer, ? super Throwable> predicate;
     public FlowableRetryBiPredicate(
-            Publisher<T> source,
+            Flowable<T> source,
             BiPredicate<? super Integer, ? super Throwable> predicate) {
         super(source);
         this.predicate = predicate;
@@ -32,26 +33,28 @@ public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstr
 
     @Override
     public void subscribeActual(Subscriber<? super T> s) {
-        SubscriptionArbiter sa = new SubscriptionArbiter();
+        SubscriptionArbiter sa = new SubscriptionArbiter(false);
         s.onSubscribe(sa);
 
         RetryBiSubscriber<T> rs = new RetryBiSubscriber<T>(s, predicate, sa, source);
         rs.subscribeNext();
     }
 
-    // FIXME update to a fresh Rsc algorithm
-    static final class RetryBiSubscriber<T> extends AtomicInteger implements Subscriber<T> {
+    static final class RetryBiSubscriber<T> extends AtomicInteger implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -7098360935104053232L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final SubscriptionArbiter sa;
         final Publisher<? extends T> source;
         final BiPredicate<? super Integer, ? super Throwable> predicate;
         int retries;
+
+        long produced;
+
         RetryBiSubscriber(Subscriber<? super T> actual,
                 BiPredicate<? super Integer, ? super Throwable> predicate, SubscriptionArbiter sa, Publisher<? extends T> source) {
-            this.actual = actual;
+            this.downstream = actual;
             this.sa = sa;
             this.source = source;
             this.predicate = predicate;
@@ -64,9 +67,10 @@ public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstr
 
         @Override
         public void onNext(T t) {
-            actual.onNext(t);
-            sa.produced(1L);
+            produced++;
+            downstream.onNext(t);
         }
+
         @Override
         public void onError(Throwable t) {
             boolean b;
@@ -74,11 +78,11 @@ public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstr
                 b = predicate.test(++retries, t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                actual.onError(new CompositeException(e, t));
+                downstream.onError(new CompositeException(t, e));
                 return;
             }
             if (!b) {
-                actual.onError(t);
+                downstream.onError(t);
                 return;
             }
             subscribeNext();
@@ -86,7 +90,7 @@ public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstr
 
         @Override
         public void onComplete() {
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         /**
@@ -99,6 +103,13 @@ public final class FlowableRetryBiPredicate<T> extends AbstractFlowableWithUpstr
                     if (sa.isCancelled()) {
                         return;
                     }
+
+                    long p = produced;
+                    if (p != 0L) {
+                        produced = 0L;
+                        sa.produced(p);
+                    }
+
                     source.subscribe(this);
 
                     missed = addAndGet(-missed);

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 
 /**
- * Default wrappers and implementations for Subscriber-based consumer classes and interfaces;
- * utility classes for creating them from callbacks.
+ * Default wrappers and implementations for Subscriber-based consumer classes and interfaces,
+ * including disposable and resource-tracking variants and
+ * the {@link io.reactivex.subscribers.TestSubscriber} that allows unit testing
+ * {@link io.reactivex.Flowable}-based flows.
  */
 package io.reactivex.subscribers;

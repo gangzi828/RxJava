@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -54,12 +54,12 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
 
         private static final long serialVersionUID = -2187421758664251153L;
 
-        final MaybeObserver<? super T> actual;
+        final MaybeObserver<? super T> downstream;
 
         final TakeUntilOtherMaybeObserver<U> other;
 
-        TakeUntilMainMaybeObserver(MaybeObserver<? super T> actual) {
-            this.actual = actual;
+        TakeUntilMainMaybeObserver(MaybeObserver<? super T> downstream) {
+            this.downstream = downstream;
             this.other = new TakeUntilOtherMaybeObserver<U>(this);
         }
 
@@ -83,7 +83,7 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
         public void onSuccess(T value) {
             SubscriptionHelper.cancel(other);
             if (getAndSet(DisposableHelper.DISPOSED) != DisposableHelper.DISPOSED) {
-                actual.onSuccess(value);
+                downstream.onSuccess(value);
             }
         }
 
@@ -91,7 +91,7 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
         public void onError(Throwable e) {
             SubscriptionHelper.cancel(other);
             if (getAndSet(DisposableHelper.DISPOSED) != DisposableHelper.DISPOSED) {
-                actual.onError(e);
+                downstream.onError(e);
             } else {
                 RxJavaPlugins.onError(e);
             }
@@ -101,13 +101,13 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
         public void onComplete() {
             SubscriptionHelper.cancel(other);
             if (getAndSet(DisposableHelper.DISPOSED) != DisposableHelper.DISPOSED) {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
         void otherError(Throwable e) {
             if (DisposableHelper.dispose(this)) {
-                actual.onError(e);
+                downstream.onError(e);
             } else {
                 RxJavaPlugins.onError(e);
             }
@@ -115,12 +115,12 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
 
         void otherComplete() {
             if (DisposableHelper.dispose(this)) {
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
 
         static final class TakeUntilOtherMaybeObserver<U>
-        extends AtomicReference<Subscription> implements Subscriber<U> {
+        extends AtomicReference<Subscription> implements FlowableSubscriber<U> {
 
             private static final long serialVersionUID = -1266041316834525931L;
 
@@ -132,13 +132,12 @@ public final class MaybeTakeUntilPublisher<T, U> extends AbstractMaybeWithUpstre
 
             @Override
             public void onSubscribe(Subscription s) {
-                if (SubscriptionHelper.setOnce(this, s)) {
-                    s.request(Long.MAX_VALUE);
-                }
+                SubscriptionHelper.setOnce(this, s, Long.MAX_VALUE);
             }
 
             @Override
             public void onNext(Object value) {
+                SubscriptionHelper.cancel(this);
                 parent.otherComplete();
             }
 

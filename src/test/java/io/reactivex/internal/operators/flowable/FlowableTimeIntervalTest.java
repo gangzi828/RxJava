@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,9 +19,10 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.*;
 import org.mockito.InOrder;
-import org.reactivestreams.Subscriber;
+import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.Function;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.PublishProcessor;
@@ -31,40 +32,40 @@ public class FlowableTimeIntervalTest {
 
     private static final TimeUnit TIME_UNIT = TimeUnit.MILLISECONDS;
 
-    private Subscriber<Timed<Integer>> observer;
+    private Subscriber<Timed<Integer>> subscriber;
 
     private TestScheduler testScheduler;
-    private PublishProcessor<Integer> subject;
-    private Flowable<Timed<Integer>> observable;
+    private PublishProcessor<Integer> processor;
+    private Flowable<Timed<Integer>> flowable;
 
     @Before
     public void setUp() {
-        observer = TestHelper.mockSubscriber();
+        subscriber = TestHelper.mockSubscriber();
         testScheduler = new TestScheduler();
-        subject = PublishProcessor.create();
-        observable = subject.timeInterval(testScheduler);
+        processor = PublishProcessor.create();
+        flowable = processor.timeInterval(testScheduler);
     }
 
     @Test
     public void testTimeInterval() {
-        InOrder inOrder = inOrder(observer);
-        observable.subscribe(observer);
+        InOrder inOrder = inOrder(subscriber);
+        flowable.subscribe(subscriber);
 
         testScheduler.advanceTimeBy(1000, TIME_UNIT);
-        subject.onNext(1);
+        processor.onNext(1);
         testScheduler.advanceTimeBy(2000, TIME_UNIT);
-        subject.onNext(2);
+        processor.onNext(2);
         testScheduler.advanceTimeBy(3000, TIME_UNIT);
-        subject.onNext(3);
-        subject.onComplete();
+        processor.onNext(3);
+        processor.onComplete();
 
-        inOrder.verify(observer, times(1)).onNext(
+        inOrder.verify(subscriber, times(1)).onNext(
                 new Timed<Integer>(1, 1000, TIME_UNIT));
-        inOrder.verify(observer, times(1)).onNext(
+        inOrder.verify(subscriber, times(1)).onNext(
                 new Timed<Integer>(2, 2000, TIME_UNIT));
-        inOrder.verify(observer, times(1)).onNext(
+        inOrder.verify(subscriber, times(1)).onNext(
                 new Timed<Integer>(3, 3000, TIME_UNIT));
-        inOrder.verify(observer, times(1)).onComplete();
+        inOrder.verify(subscriber, times(1)).onComplete();
         inOrder.verifyNoMoreInteractions();
     }
 
@@ -122,4 +123,28 @@ public class FlowableTimeIntervalTest {
         }
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.just(1).timeInterval());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .timeInterval()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Publisher<Timed<Object>>>() {
+            @Override
+            public Publisher<Timed<Object>> apply(Flowable<Object> f)
+                    throws Exception {
+                return f.timeInterval();
+            }
+        });
+    }
 }

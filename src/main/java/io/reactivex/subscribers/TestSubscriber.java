@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,11 +16,12 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Consumer;
 import io.reactivex.internal.fuseable.QueueSubscription;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
-import io.reactivex.internal.util.*;
+import io.reactivex.internal.util.ExceptionHelper;
 import io.reactivex.observers.BaseTestConsumer;
 
 /**
@@ -38,15 +39,15 @@ import io.reactivex.observers.BaseTestConsumer;
  */
 public class TestSubscriber<T>
 extends BaseTestConsumer<T, TestSubscriber<T>>
-implements Subscriber<T>, Subscription, Disposable {
+implements FlowableSubscriber<T>, Subscription, Disposable {
     /** The actual subscriber to forward events to. */
-    private final Subscriber<? super T> actual;
+    private final Subscriber<? super T> downstream;
 
     /** Makes sure the incoming Subscriptions get cancelled immediately. */
     private volatile boolean cancelled;
 
     /** Holds the current subscription if any. */
-    private final AtomicReference<Subscription> subscription;
+    private final AtomicReference<Subscription> upstream;
 
     /** Holds the requested amount until a subscription arrives. */
     private final AtomicLong missedRequested;
@@ -101,10 +102,10 @@ implements Subscriber<T>, Subscription, Disposable {
 
     /**
      * Constructs a forwarding TestSubscriber but leaves the requesting to the wrapped subscriber.
-     * @param actual the actual Subscriber to forward events to
+     * @param downstream the actual Subscriber to forward events to
      */
-    public TestSubscriber(Subscriber<? super T> actual) {
-        this(actual, Long.MAX_VALUE);
+    public TestSubscriber(Subscriber<? super T> downstream) {
+        this(downstream, Long.MAX_VALUE);
     }
 
     /**
@@ -116,8 +117,11 @@ implements Subscriber<T>, Subscription, Disposable {
      */
     public TestSubscriber(Subscriber<? super T> actual, long initialRequest) {
         super();
-        this.actual = actual;
-        this.subscription = new AtomicReference<Subscription>();
+        if (initialRequest < 0) {
+            throw new IllegalArgumentException("Negative initial request not allowed");
+        }
+        this.downstream = actual;
+        this.upstream = new AtomicReference<Subscription>();
         this.missedRequested = new AtomicLong(initialRequest);
     }
 
@@ -130,9 +134,9 @@ implements Subscriber<T>, Subscription, Disposable {
             errors.add(new NullPointerException("onSubscribe received a null Subscription"));
             return;
         }
-        if (!subscription.compareAndSet(null, s)) {
+        if (!upstream.compareAndSet(null, s)) {
             s.cancel();
-            if (subscription.get() != SubscriptionHelper.CANCELLED) {
+            if (upstream.get() != SubscriptionHelper.CANCELLED) {
                 errors.add(new IllegalStateException("onSubscribe received multiple subscriptions: " + s));
             }
             return;
@@ -163,8 +167,7 @@ implements Subscriber<T>, Subscription, Disposable {
             }
         }
 
-
-        actual.onSubscribe(s);
+        downstream.onSubscribe(s);
 
         long mr = missedRequested.getAndSet(0L);
         if (mr != 0L) {
@@ -185,7 +188,7 @@ implements Subscriber<T>, Subscription, Disposable {
     public void onNext(T t) {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new IllegalStateException("onSubscribe not called in proper order"));
             }
         }
@@ -199,6 +202,7 @@ implements Subscriber<T>, Subscription, Disposable {
             } catch (Throwable ex) {
                 // Exceptions.throwIfFatal(e); TODO add fatal exceptions?
                 errors.add(ex);
+                qs.cancel();
             }
             return;
         }
@@ -206,17 +210,17 @@ implements Subscriber<T>, Subscription, Disposable {
         values.add(t);
 
         if (t == null) {
-            errors.add(new NullPointerException("onNext received a null Subscription"));
+            errors.add(new NullPointerException("onNext received a null value"));
         }
 
-        actual.onNext(t);
+        downstream.onNext(t);
     }
 
     @Override
     public void onError(Throwable t) {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new NullPointerException("onSubscribe not called in proper order"));
             }
         }
@@ -225,10 +229,10 @@ implements Subscriber<T>, Subscription, Disposable {
             errors.add(t);
 
             if (t == null) {
-                errors.add(new IllegalStateException("onError received a null Subscription"));
+                errors.add(new IllegalStateException("onError received a null Throwable"));
             }
 
-            actual.onError(t);
+            downstream.onError(t);
         } finally {
             done.countDown();
         }
@@ -238,7 +242,7 @@ implements Subscriber<T>, Subscription, Disposable {
     public void onComplete() {
         if (!checkSubscriptionOnce) {
             checkSubscriptionOnce = true;
-            if (subscription.get() == null) {
+            if (upstream.get() == null) {
                 errors.add(new IllegalStateException("onSubscribe not called in proper order"));
             }
         }
@@ -246,7 +250,7 @@ implements Subscriber<T>, Subscription, Disposable {
             lastThread = Thread.currentThread();
             completions++;
 
-            actual.onComplete();
+            downstream.onComplete();
         } finally {
             done.countDown();
         }
@@ -254,14 +258,14 @@ implements Subscriber<T>, Subscription, Disposable {
 
     @Override
     public final void request(long n) {
-        SubscriptionHelper.deferredRequest(subscription, missedRequested, n);
+        SubscriptionHelper.deferredRequest(upstream, missedRequested, n);
     }
 
     @Override
     public final void cancel() {
         if (!cancelled) {
             cancelled = true;
-            SubscriptionHelper.cancel(subscription);
+            SubscriptionHelper.cancel(upstream);
         }
     }
 
@@ -290,7 +294,7 @@ implements Subscriber<T>, Subscription, Disposable {
      * @return true if this TestSubscriber received a subscription
      */
     public final boolean hasSubscription() {
-        return subscription.get() != null;
+        return upstream.get() != null;
     }
 
     // assertion methods
@@ -301,7 +305,7 @@ implements Subscriber<T>, Subscription, Disposable {
      */
     @Override
     public final TestSubscriber<T> assertSubscribed() {
-        if (subscription.get() == null) {
+        if (upstream.get() == null) {
             throw fail("Not subscribed!");
         }
         return this;
@@ -313,7 +317,7 @@ implements Subscriber<T>, Subscription, Disposable {
      */
     @Override
     public final TestSubscriber<T> assertNotSubscribed() {
-        if (subscription.get() != null) {
+        if (upstream.get() != null) {
             throw fail("Subscribed!");
         } else
         if (!errors.isEmpty()) {
@@ -404,9 +408,21 @@ implements Subscriber<T>, Subscription, Disposable {
     }
 
     /**
+     * Calls {@link #request(long)} and returns this.
+     * <p>History: 2.0.1 - experimental
+     * @param n the request amount
+     * @return this
+     * @since 2.1
+     */
+    public final TestSubscriber<T> requestMore(long n) {
+        request(n);
+        return this;
+    }
+
+    /**
      * A subscriber that ignores all events and does not report errors.
      */
-    enum EmptySubscriber implements Subscriber<Object> {
+    enum EmptySubscriber implements FlowableSubscriber<Object> {
         INSTANCE;
 
         @Override

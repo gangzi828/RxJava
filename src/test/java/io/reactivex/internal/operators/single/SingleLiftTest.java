@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,22 +25,22 @@ public class SingleLiftTest {
 
         Single.just(1).lift(new SingleOperator<Integer, Integer>() {
             @Override
-            public SingleObserver<Integer> apply(final SingleObserver<? super Integer> s) throws Exception {
+            public SingleObserver<Integer> apply(final SingleObserver<? super Integer> observer) throws Exception {
                 return new SingleObserver<Integer>() {
 
                     @Override
                     public void onSubscribe(Disposable d) {
-                        s.onSubscribe(d);
+                        observer.onSubscribe(d);
                     }
 
                     @Override
                     public void onSuccess(Integer value) {
-                        s.onSuccess(value + 1);
+                        observer.onSuccess(value + 1);
                     }
 
                     @Override
                     public void onError(Throwable e) {
-                        s.onError(e);
+                        observer.onError(e);
                     }
                 };
             }

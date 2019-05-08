@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,6 +32,8 @@ import io.reactivex.internal.functions.Functions;
 import io.reactivex.observables.GroupedObservable;
 import io.reactivex.observers.*;
 import io.reactivex.schedulers.Schedulers;
+import io.reactivex.subjects.PublishSubject;
+
 import org.mockito.Mockito;
 
 public class ObservableGroupByTest {
@@ -169,7 +171,7 @@ public class ObservableGroupByTest {
     /**
      * Assert that only a single subscription to a stream occurs and that all events are received.
      *
-     * @throws Throwable
+     * @throws Throwable some method may throw
      */
     @Test
     public void testGroupedEventStream() throws Throwable {
@@ -991,10 +993,8 @@ public class ObservableGroupByTest {
         Observable<GroupedObservable<Boolean, Long>> stream = source.groupBy(IS_EVEN);
 
         // create two observers
-        @SuppressWarnings("unchecked")
-        DefaultObserver<GroupedObservable<Boolean, Long>> o1 = mock(DefaultObserver.class);
-        @SuppressWarnings("unchecked")
-        DefaultObserver<GroupedObservable<Boolean, Long>> o2 = mock(DefaultObserver.class);
+        Observer<GroupedObservable<Boolean, Long>> o1 = TestHelper.mockObserver();
+        Observer<GroupedObservable<Boolean, Long>> o2 = TestHelper.mockObserver();
 
         // subscribe with the observers
         stream.subscribe(o1);
@@ -1024,7 +1024,7 @@ public class ObservableGroupByTest {
     @Test
     public void testGroupByBackpressure() throws InterruptedException {
 
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
 
         Observable.range(1, 4000)
                 .groupBy(IS_EVEN2)
@@ -1050,9 +1050,9 @@ public class ObservableGroupByTest {
                         });
                     }
 
-                }).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+                }).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
     }
 
     <T, R> Function<T, R> just(final R value) {
@@ -1151,12 +1151,12 @@ public class ObservableGroupByTest {
             }
         });
 
-        TestObserver<String> ts = new TestObserver<String>();
-        m.subscribe(ts);
-        ts.awaitTerminalEvent();
-        System.out.println("ts .get " + ts.values());
-        ts.assertNoErrors();
-        assertEquals(ts.values(),
+        TestObserver<String> to = new TestObserver<String>();
+        m.subscribe(to);
+        to.awaitTerminalEvent();
+        System.out.println("ts .get " + to.values());
+        to.assertNoErrors();
+        assertEquals(to.values(),
                 Arrays.asList("foo-0", "foo-1", "bar-0", "foo-0", "baz-0", "qux-0", "bar-1", "bar-0", "foo-1", "baz-1", "baz-0", "foo-0"));
 
     }
@@ -1167,11 +1167,11 @@ public class ObservableGroupByTest {
 
         Observable<Integer> m = source.groupBy(fail(0), dbl).flatMap(FLATTEN_INTEGER);
 
-        TestObserver<Integer> ts = new TestObserver<Integer>();
-        m.subscribe(ts);
-        ts.awaitTerminalEvent();
-        assertEquals(1, ts.errorCount());
-        ts.assertNoValues();
+        TestObserver<Integer> to = new TestObserver<Integer>();
+        m.subscribe(to);
+        to.awaitTerminalEvent();
+        assertEquals(1, to.errorCount());
+        to.assertNoValues();
     }
 
     @Test
@@ -1179,11 +1179,11 @@ public class ObservableGroupByTest {
         Observable<Integer> source = Observable.just(0, 1, 2, 3, 4, 5, 6);
 
         Observable<Integer> m = source.groupBy(identity, fail(0)).flatMap(FLATTEN_INTEGER);
-        TestObserver<Integer> ts = new TestObserver<Integer>();
-        m.subscribe(ts);
-        ts.awaitTerminalEvent();
-        assertEquals(1, ts.errorCount());
-        ts.assertNoValues();
+        TestObserver<Integer> to = new TestObserver<Integer>();
+        m.subscribe(to);
+        to.awaitTerminalEvent();
+        assertEquals(1, to.errorCount());
+        to.assertNoValues();
 
     }
 
@@ -1193,11 +1193,11 @@ public class ObservableGroupByTest {
 
         Observable<Integer> m = source.groupBy(identity, dbl).flatMap(FLATTEN_INTEGER);
 
-        TestObserver<Object> ts = new TestObserver<Object>();
-        m.subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
-        System.out.println(ts.values());
+        TestObserver<Object> to = new TestObserver<Object>();
+        m.subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
+        System.out.println(to.values());
     }
 
     /**
@@ -1220,8 +1220,7 @@ public class ObservableGroupByTest {
 
         inner.get().subscribe();
 
-        @SuppressWarnings("unchecked")
-        DefaultObserver<Integer> o2 = mock(DefaultObserver.class);
+        Observer<Integer> o2 = TestHelper.mockObserver();
 
         inner.get().subscribe(o2);
 
@@ -1237,16 +1236,16 @@ public class ObservableGroupByTest {
 
         Observable<Integer> m = source.groupBy(identity, dbl).flatMap(FLATTEN_INTEGER);
 
-        TestObserver<Object> ts = new TestObserver<Object>();
-        m.subscribe(ts);
-        ts.awaitTerminalEvent();
-        assertEquals(1, ts.errorCount());
-        ts.assertValueCount(1);
+        TestObserver<Object> to = new TestObserver<Object>();
+        m.subscribe(to);
+        to.awaitTerminalEvent();
+        assertEquals(1, to.errorCount());
+        to.assertValueCount(1);
     }
 
     @Test
     public void testgroupByBackpressure() throws InterruptedException {
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
 
         Observable.range(1, 4000).groupBy(IS_EVEN2).flatMap(new Function<GroupedObservable<Boolean, Integer>, Observable<String>>() {
 
@@ -1295,15 +1294,15 @@ public class ObservableGroupByTest {
                 System.out.println("NEXT: " + t1);
             }
 
-        }).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+        }).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
     }
 
     @Test
     public void testgroupByBackpressure2() throws InterruptedException {
 
-        TestObserver<String> ts = new TestObserver<String>();
+        TestObserver<String> to = new TestObserver<String>();
 
         Observable.range(1, 4000).groupBy(IS_EVEN2).flatMap(new Function<GroupedObservable<Boolean, Integer>, Observable<String>>() {
 
@@ -1327,9 +1326,9 @@ public class ObservableGroupByTest {
                 });
             }
 
-        }).subscribe(ts);
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
+        }).subscribe(to);
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
     }
 
     static Function<GroupedObservable<Integer, Integer>, Observable<Integer>> FLATTEN_INTEGER = new Function<GroupedObservable<Integer, Integer>, Observable<Integer>>() {
@@ -1371,16 +1370,16 @@ public class ObservableGroupByTest {
 
     @Test
     public void testGroupByUnsubscribe() {
-        final Disposable s = mock(Disposable.class);
+        final Disposable upstream = mock(Disposable.class);
         Observable<Integer> o = Observable.unsafeCreate(
                 new ObservableSource<Integer>() {
                     @Override
                     public void subscribe(Observer<? super Integer> observer) {
-                        observer.onSubscribe(s);
+                        observer.onSubscribe(upstream);
                     }
                 }
         );
-        TestObserver<Object> ts = new TestObserver<Object>();
+        TestObserver<Object> to = new TestObserver<Object>();
 
         o.groupBy(new Function<Integer, Integer>() {
 
@@ -1388,11 +1387,11 @@ public class ObservableGroupByTest {
             public Integer apply(Integer integer) {
                 return null;
             }
-        }).subscribe(ts);
+        }).subscribe(to);
 
-        ts.dispose();
+        to.dispose();
 
-        verify(s).dispose();
+        verify(upstream).dispose();
     }
 
     @Test
@@ -1446,10 +1445,10 @@ public class ObservableGroupByTest {
     @Test
     public void keySelectorAndDelayError() {
         Observable.just(1).concatWith(Observable.<Integer>error(new TestException()))
-        .groupBy(Functions.identity(), true)
-        .flatMap(new Function<GroupedObservable<Object, Integer>, ObservableSource<Integer>>() {
+        .groupBy(Functions.<Integer>identity(), true)
+        .flatMap(new Function<GroupedObservable<Integer, Integer>, ObservableSource<Integer>>() {
             @Override
-            public ObservableSource<Integer> apply(GroupedObservable<Object, Integer> g) throws Exception {
+            public ObservableSource<Integer> apply(GroupedObservable<Integer, Integer> g) throws Exception {
                 return g;
             }
         })
@@ -1460,10 +1459,10 @@ public class ObservableGroupByTest {
     @Test
     public void keyAndValueSelectorAndDelayError() {
         Observable.just(1).concatWith(Observable.<Integer>error(new TestException()))
-        .groupBy(Functions.identity(), Functions.<Integer>identity(), true)
-        .flatMap(new Function<GroupedObservable<Object, Integer>, ObservableSource<Integer>>() {
+        .groupBy(Functions.<Integer>identity(), Functions.<Integer>identity(), true)
+        .flatMap(new Function<GroupedObservable<Integer, Integer>, ObservableSource<Integer>>() {
             @Override
-            public ObservableSource<Integer> apply(GroupedObservable<Object, Integer> g) throws Exception {
+            public ObservableSource<Integer> apply(GroupedObservable<Integer, Integer> g) throws Exception {
                 return g;
             }
         })
@@ -1471,4 +1470,72 @@ public class ObservableGroupByTest {
         .assertFailure(TestException.class, 1);
     }
 
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).groupBy(Functions.justFunction(1)));
+
+        Observable.just(1)
+        .groupBy(Functions.justFunction(1))
+        .doOnNext(new Consumer<GroupedObservable<Integer, Integer>>() {
+            @Override
+            public void accept(GroupedObservable<Integer, Integer> g) throws Exception {
+                TestHelper.checkDisposed(g);
+            }
+        })
+        .test();
+    }
+
+    @Test
+    public void reentrantComplete() {
+        final PublishSubject<Integer> ps = PublishSubject.create();
+
+        TestObserver<Integer> to = new TestObserver<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    ps.onComplete();
+                }
+            }
+        };
+
+        Observable.merge(ps.groupBy(Functions.justFunction(1)))
+        .subscribe(to);
+
+        ps.onNext(1);
+
+        to.assertResult(1);
+    }
+
+    @Test
+    public void reentrantCompleteCancel() {
+        final PublishSubject<Integer> ps = PublishSubject.create();
+
+        TestObserver<Integer> to = new TestObserver<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    ps.onComplete();
+                    dispose();
+                }
+            }
+        };
+
+        Observable.merge(ps.groupBy(Functions.justFunction(1)))
+        .subscribe(to);
+
+        ps.onNext(1);
+
+        to.assertSubscribed().assertValue(1).assertNoErrors().assertNotComplete();
+    }
+
+    @Test
+    public void delayErrorSimpleComplete() {
+        Observable.just(1)
+        .groupBy(Functions.justFunction(1), true)
+        .flatMap(Functions.<Observable<Integer>>identity())
+        .test()
+        .assertResult(1);
+    }
 }

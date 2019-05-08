@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -31,7 +31,7 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
     final int bufferSize;
     final boolean delayError;
 
-    public FlowableTakeLastTimed(Publisher<T> source,
+    public FlowableTakeLastTimed(Flowable<T> source,
             long count, long time, TimeUnit unit, Scheduler scheduler,
             int bufferSize, boolean delayError) {
         super(source);
@@ -48,10 +48,10 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
         source.subscribe(new TakeLastTimedSubscriber<T>(s, count, time, unit, scheduler, bufferSize, delayError));
     }
 
-    static final class TakeLastTimedSubscriber<T> extends AtomicInteger implements Subscriber<T>, Subscription {
+    static final class TakeLastTimedSubscriber<T> extends AtomicInteger implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -5677354903406201275L;
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final long count;
         final long time;
         final TimeUnit unit;
@@ -59,7 +59,7 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
         final SpscLinkedArrayQueue<Object> queue;
         final boolean delayError;
 
-        Subscription s;
+        Subscription upstream;
 
         final AtomicLong requested = new AtomicLong();
 
@@ -69,7 +69,7 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
         Throwable error;
 
         TakeLastTimedSubscriber(Subscriber<? super T> actual, long count, long time, TimeUnit unit, Scheduler scheduler, int bufferSize, boolean delayError) {
-            this.actual = actual;
+            this.downstream = actual;
             this.count = count;
             this.time = time;
             this.unit = unit;
@@ -80,9 +80,9 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -141,12 +141,12 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
 
         @Override
         public void cancel() {
-            if (cancelled) {
+            if (!cancelled) {
                 cancelled = true;
+                upstream.cancel();
 
                 if (getAndIncrement() == 0) {
                     queue.clear();
-                    s.cancel();
                 }
             }
         }
@@ -158,7 +158,7 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
 
             int missed = 1;
 
-            final Subscriber<? super T> a = actual;
+            final Subscriber<? super T> a = downstream;
             final SpscLinkedArrayQueue<Object> q = queue;
             final boolean delayError = this.delayError;
 
@@ -172,7 +172,6 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
                     }
 
                     long r = requested.get();
-                    boolean unbounded = r == Long.MAX_VALUE; // NOPMD
                     long e = 0L;
 
                     for (;;) {
@@ -183,29 +182,21 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
                             return;
                         }
 
-                        if (empty || r == 0L) {
+                        if (r == e) {
                             break;
                         }
 
                         q.poll();
                         @SuppressWarnings("unchecked")
                         T o = (T)q.poll();
-                        if (o == null) {
-                            s.cancel();
-                            a.onError(new IllegalStateException("Queue empty?!"));
-                            return;
-                        }
 
                         a.onNext(o);
 
-                        r--;
-                        e--;
+                        e++;
                     }
 
                     if (e != 0L) {
-                        if (!unbounded) {
-                            requested.addAndGet(e);
-                        }
+                        BackpressureHelper.produced(requested, e);
                     }
                 }
 
@@ -219,7 +210,6 @@ public final class FlowableTakeLastTimed<T> extends AbstractFlowableWithUpstream
         boolean checkTerminated(boolean empty, Subscriber<? super T> a, boolean delayError) {
             if (cancelled) {
                 queue.clear();
-                s.cancel();
                 return true;
             }
             if (delayError) {

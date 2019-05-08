@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,10 +16,12 @@ package io.reactivex.internal.operators.observable;
 import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.fuseable.FuseToObservable;
+
 import java.util.NoSuchElementException;
 import io.reactivex.plugins.RxJavaPlugins;
 
-public final class ObservableElementAtSingle<T> extends Single<T> {
+public final class ObservableElementAtSingle<T> extends Single<T> implements FuseToObservable<T> {
     final ObservableSource<T> source;
     final long index;
     final T defaultValue;
@@ -35,42 +37,45 @@ public final class ObservableElementAtSingle<T> extends Single<T> {
         source.subscribe(new ElementAtObserver<T>(t, index, defaultValue));
     }
 
+    @Override
+    public Observable<T> fuseToObservable() {
+        return RxJavaPlugins.onAssembly(new ObservableElementAt<T>(source, index, defaultValue, true));
+    }
+
     static final class ElementAtObserver<T> implements Observer<T>, Disposable {
-        final SingleObserver<? super T> actual;
+        final SingleObserver<? super T> downstream;
         final long index;
         final T defaultValue;
 
-        Disposable s;
+        Disposable upstream;
 
         long count;
 
         boolean done;
 
         ElementAtObserver(SingleObserver<? super T> actual, long index, T defaultValue) {
-            this.actual = actual;
+            this.downstream = actual;
             this.index = index;
             this.defaultValue = defaultValue;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -80,8 +85,8 @@ public final class ObservableElementAtSingle<T> extends Single<T> {
             long c = count;
             if (c == index) {
                 done = true;
-                s.dispose();
-                actual.onSuccess(t);
+                upstream.dispose();
+                downstream.onSuccess(t);
                 return;
             }
             count = c + 1;
@@ -94,7 +99,7 @@ public final class ObservableElementAtSingle<T> extends Single<T> {
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -105,9 +110,9 @@ public final class ObservableElementAtSingle<T> extends Single<T> {
                 T v = defaultValue;
 
                 if (v != null) {
-                    actual.onSuccess(v);
+                    downstream.onSuccess(v);
                 } else {
-                    actual.onError(new NoSuchElementException());
+                    downstream.onError(new NoSuchElementException());
                 }
             }
         }

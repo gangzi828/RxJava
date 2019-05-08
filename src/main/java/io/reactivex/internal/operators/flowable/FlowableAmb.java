@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,12 +15,11 @@ package io.reactivex.internal.operators.flowable;
 
 import java.util.concurrent.atomic.*;
 
-import io.reactivex.exceptions.Exceptions;
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
+import io.reactivex.exceptions.Exceptions;
 import io.reactivex.internal.subscriptions.*;
-import io.reactivex.internal.util.BackpressureHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableAmb<T> extends Flowable<T> {
@@ -75,14 +74,14 @@ public final class FlowableAmb<T> extends Flowable<T> {
     }
 
     static final class AmbCoordinator<T> implements Subscription {
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final AmbInnerSubscriber<T>[] subscribers;
 
         final AtomicInteger winner = new AtomicInteger();
 
         @SuppressWarnings("unchecked")
         AmbCoordinator(Subscriber<? super T> actual, int count) {
-            this.actual = actual;
+            this.downstream = actual;
             this.subscribers = new AmbInnerSubscriber[count];
         }
 
@@ -90,10 +89,10 @@ public final class FlowableAmb<T> extends Flowable<T> {
             AmbInnerSubscriber<T>[] as = subscribers;
             int len = as.length;
             for (int i = 0; i < len; i++) {
-                as[i] = new AmbInnerSubscriber<T>(this, i + 1, actual);
+                as[i] = new AmbInnerSubscriber<T>(this, i + 1, downstream);
             }
             winner.lazySet(0); // release the contents of 'as'
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
 
             for (int i = 0; i < len; i++) {
                 if (winner.get() != 0) {
@@ -106,17 +105,15 @@ public final class FlowableAmb<T> extends Flowable<T> {
 
         @Override
         public void request(long n) {
-            if (!SubscriptionHelper.validate(n)) {
-                return;
-            }
-
-            int w = winner.get();
-            if (w > 0) {
-                subscribers[w - 1].request(n);
-            } else
-            if (w == 0) {
-                for (AmbInnerSubscriber<T> a : subscribers) {
-                    a.request(n);
+            if (SubscriptionHelper.validate(n)) {
+                int w = winner.get();
+                if (w > 0) {
+                    subscribers[w - 1].request(n);
+                } else
+                if (w == 0) {
+                    for (AmbInnerSubscriber<T> a : subscribers) {
+                        a.request(n);
+                    }
                 }
             }
         }
@@ -134,9 +131,8 @@ public final class FlowableAmb<T> extends Flowable<T> {
                     }
                     return true;
                 }
-                return false;
             }
-            return w == index;
+            return false;
         }
 
         @Override
@@ -151,58 +147,41 @@ public final class FlowableAmb<T> extends Flowable<T> {
         }
     }
 
-    static final class AmbInnerSubscriber<T> extends AtomicReference<Subscription> implements Subscriber<T>, Subscription {
+    static final class AmbInnerSubscriber<T> extends AtomicReference<Subscription> implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -1185974347409665484L;
         final AmbCoordinator<T> parent;
         final int index;
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
         boolean won;
 
         final AtomicLong missedRequested = new AtomicLong();
 
-        AmbInnerSubscriber(AmbCoordinator<T> parent, int index, Subscriber<? super T> actual) {
+        AmbInnerSubscriber(AmbCoordinator<T> parent, int index, Subscriber<? super T> downstream) {
             this.parent = parent;
             this.index = index;
-            this.actual = actual;
+            this.downstream = downstream;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this, s)) {
-                long r = missedRequested.getAndSet(0L);
-                if (r != 0L) {
-                    s.request(r);
-                }
-            }
+            SubscriptionHelper.deferredSetOnce(this, missedRequested, s);
         }
 
         @Override
         public void request(long n) {
-            Subscription s = get();
-            if (s != null) {
-                s.request(n);
-            } else if (SubscriptionHelper.validate(n)) {
-                BackpressureHelper.add(missedRequested, n);
-                s = get();
-                if (s != null && s != SubscriptionHelper.CANCELLED) {
-                    long r = missedRequested.getAndSet(0L);
-                    if (r != 0L) {
-                        s.request(r);
-                    }
-                }
-            }
+            SubscriptionHelper.deferredRequest(this, missedRequested, n);
         }
 
         @Override
         public void onNext(T t) {
             if (won) {
-                actual.onNext(t);
+                downstream.onNext(t);
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onNext(t);
+                    downstream.onNext(t);
                 } else {
                     get().cancel();
                 }
@@ -212,11 +191,11 @@ public final class FlowableAmb<T> extends Flowable<T> {
         @Override
         public void onError(Throwable t) {
             if (won) {
-                actual.onError(t);
+                downstream.onError(t);
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onError(t);
+                    downstream.onError(t);
                 } else {
                     get().cancel();
                     RxJavaPlugins.onError(t);
@@ -227,11 +206,11 @@ public final class FlowableAmb<T> extends Flowable<T> {
         @Override
         public void onComplete() {
             if (won) {
-                actual.onComplete();
+                downstream.onComplete();
             } else {
                 if (parent.win(index)) {
                     won = true;
-                    actual.onComplete();
+                    downstream.onComplete();
                 } else {
                     get().cancel();
                 }

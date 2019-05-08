@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,8 +24,10 @@ import org.junit.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.Flowable;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
 import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -35,8 +37,8 @@ import io.reactivex.subscribers.*;
 
 public class FlowableMapTest {
 
-    Subscriber<String> stringObserver;
-    Subscriber<String> stringObserver2;
+    Subscriber<String> stringSubscriber;
+    Subscriber<String> stringSubscriber2;
 
     static final BiFunction<String, Integer, String> APPEND_INDEX = new BiFunction<String, Integer, String>() {
         @Override
@@ -47,29 +49,29 @@ public class FlowableMapTest {
 
     @Before
     public void before() {
-        stringObserver = TestHelper.mockSubscriber();
-        stringObserver2 = TestHelper.mockSubscriber();
+        stringSubscriber = TestHelper.mockSubscriber();
+        stringSubscriber2 = TestHelper.mockSubscriber();
     }
 
     @Test
     public void testMap() {
         Map<String, String> m1 = getMap("One");
         Map<String, String> m2 = getMap("Two");
-        Flowable<Map<String, String>> observable = Flowable.just(m1, m2);
+        Flowable<Map<String, String>> flowable = Flowable.just(m1, m2);
 
-        Flowable<String> m = observable.map(new Function<Map<String, String>, String>() {
+        Flowable<String> m = flowable.map(new Function<Map<String, String>, String>() {
             @Override
             public String apply(Map<String, String> map) {
                 return map.get("firstName");
             }
         });
 
-        m.subscribe(stringObserver);
+        m.subscribe(stringSubscriber);
 
-        verify(stringObserver, never()).onError(any(Throwable.class));
-        verify(stringObserver, times(1)).onNext("OneFirst");
-        verify(stringObserver, times(1)).onNext("TwoFirst");
-        verify(stringObserver, times(1)).onComplete();
+        verify(stringSubscriber, never()).onError(any(Throwable.class));
+        verify(stringSubscriber, times(1)).onNext("OneFirst");
+        verify(stringSubscriber, times(1)).onNext("TwoFirst");
+        verify(stringSubscriber, times(1)).onComplete();
     }
 
     @Test
@@ -82,20 +84,20 @@ public class FlowableMapTest {
 
             @Override
             public Flowable<String> apply(Integer id) {
-                /* simulate making a nested async call which creates another Observable */
-                Flowable<Map<String, String>> subObservable = null;
+                /* simulate making a nested async call which creates another Flowable */
+                Flowable<Map<String, String>> subFlowable = null;
                 if (id == 1) {
                     Map<String, String> m1 = getMap("One");
                     Map<String, String> m2 = getMap("Two");
-                    subObservable = Flowable.just(m1, m2);
+                    subFlowable = Flowable.just(m1, m2);
                 } else {
                     Map<String, String> m3 = getMap("Three");
                     Map<String, String> m4 = getMap("Four");
-                    subObservable = Flowable.just(m3, m4);
+                    subFlowable = Flowable.just(m3, m4);
                 }
 
                 /* simulate kicking off the async call and performing a select on it to transform the data */
-                return subObservable.map(new Function<Map<String, String>, String>() {
+                return subFlowable.map(new Function<Map<String, String>, String>() {
                     @Override
                     public String apply(Map<String, String> map) {
                         return map.get("firstName");
@@ -104,33 +106,33 @@ public class FlowableMapTest {
             }
 
         });
-        m.subscribe(stringObserver);
+        m.subscribe(stringSubscriber);
 
-        verify(stringObserver, never()).onError(any(Throwable.class));
-        verify(stringObserver, times(1)).onNext("OneFirst");
-        verify(stringObserver, times(1)).onNext("TwoFirst");
-        verify(stringObserver, times(1)).onNext("ThreeFirst");
-        verify(stringObserver, times(1)).onNext("FourFirst");
-        verify(stringObserver, times(1)).onComplete();
+        verify(stringSubscriber, never()).onError(any(Throwable.class));
+        verify(stringSubscriber, times(1)).onNext("OneFirst");
+        verify(stringSubscriber, times(1)).onNext("TwoFirst");
+        verify(stringSubscriber, times(1)).onNext("ThreeFirst");
+        verify(stringSubscriber, times(1)).onNext("FourFirst");
+        verify(stringSubscriber, times(1)).onComplete();
     }
 
     @Test
     public void testMapMany2() {
         Map<String, String> m1 = getMap("One");
         Map<String, String> m2 = getMap("Two");
-        Flowable<Map<String, String>> observable1 = Flowable.just(m1, m2);
+        Flowable<Map<String, String>> flowable1 = Flowable.just(m1, m2);
 
         Map<String, String> m3 = getMap("Three");
         Map<String, String> m4 = getMap("Four");
-        Flowable<Map<String, String>> observable2 = Flowable.just(m3, m4);
+        Flowable<Map<String, String>> flowable2 = Flowable.just(m3, m4);
 
-        Flowable<Flowable<Map<String, String>>> observable = Flowable.just(observable1, observable2);
+        Flowable<Flowable<Map<String, String>>> f = Flowable.just(flowable1, flowable2);
 
-        Flowable<String> m = observable.flatMap(new Function<Flowable<Map<String, String>>, Flowable<String>>() {
+        Flowable<String> m = f.flatMap(new Function<Flowable<Map<String, String>>, Flowable<String>>() {
 
             @Override
-            public Flowable<String> apply(Flowable<Map<String, String>> o) {
-                return o.map(new Function<Map<String, String>, String>() {
+            public Flowable<String> apply(Flowable<Map<String, String>> f) {
+                return f.map(new Function<Map<String, String>, String>() {
 
                     @Override
                     public String apply(Map<String, String> map) {
@@ -140,25 +142,27 @@ public class FlowableMapTest {
             }
 
         });
-        m.subscribe(stringObserver);
+        m.subscribe(stringSubscriber);
 
-        verify(stringObserver, never()).onError(any(Throwable.class));
-        verify(stringObserver, times(1)).onNext("OneFirst");
-        verify(stringObserver, times(1)).onNext("TwoFirst");
-        verify(stringObserver, times(1)).onNext("ThreeFirst");
-        verify(stringObserver, times(1)).onNext("FourFirst");
-        verify(stringObserver, times(1)).onComplete();
+        verify(stringSubscriber, never()).onError(any(Throwable.class));
+        verify(stringSubscriber, times(1)).onNext("OneFirst");
+        verify(stringSubscriber, times(1)).onNext("TwoFirst");
+        verify(stringSubscriber, times(1)).onNext("ThreeFirst");
+        verify(stringSubscriber, times(1)).onNext("FourFirst");
+        verify(stringSubscriber, times(1)).onComplete();
 
     }
 
     @Test
     public void testMapWithError() {
+        final List<Throwable> errors = new ArrayList<Throwable>();
+
         Flowable<String> w = Flowable.just("one", "fail", "two", "three", "fail");
         Flowable<String> m = w.map(new Function<String, String>() {
             @Override
             public String apply(String s) {
                 if ("fail".equals(s)) {
-                    throw new RuntimeException("Forced Failure");
+                    throw new TestException("Forced Failure");
                 }
                 return s;
             }
@@ -166,17 +170,19 @@ public class FlowableMapTest {
 
             @Override
             public void accept(Throwable t1) {
-                t1.printStackTrace();
+                errors.add(t1);
             }
 
         });
 
-        m.subscribe(stringObserver);
-        verify(stringObserver, times(1)).onNext("one");
-        verify(stringObserver, never()).onNext("two");
-        verify(stringObserver, never()).onNext("three");
-        verify(stringObserver, never()).onComplete();
-        verify(stringObserver, times(1)).onError(any(Throwable.class));
+        m.subscribe(stringSubscriber);
+        verify(stringSubscriber, times(1)).onNext("one");
+        verify(stringSubscriber, never()).onNext("two");
+        verify(stringSubscriber, never()).onNext("three");
+        verify(stringSubscriber, never()).onComplete();
+        verify(stringSubscriber, times(1)).onError(any(TestException.class));
+
+        TestHelper.assertError(errors, 0, TestException.class, "Forced Failure");
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -254,59 +260,6 @@ public class FlowableMapTest {
         }).blockingGet();
     }
 
-    // FIXME RS subscribers can't throw
-//    @Test(expected = OnErrorNotImplementedException.class)
-//    public void verifyExceptionIsThrownIfThereIsNoExceptionHandler() {
-//
-//        Publisher<Object> creator = new Publisher<Object>() {
-//
-//            @Override
-//            public void subscribe(Subscriber<? super Object> observer) {
-//                observer.onSubscribe(EmptySubscription.INSTANCE);
-//                observer.onNext("a");
-//                observer.onNext("b");
-//                observer.onNext("c");
-//                observer.onComplete();
-//            }
-//        };
-//
-//        Function<Object, Observable<Object>> manyMapper = new Function<Object, Observable<Object>>() {
-//
-//            @Override
-//            public Observable<Object> apply(Object object) {
-//                return Observable.just(object);
-//            }
-//        };
-//
-//        Function<Object, Object> mapper = new Function<Object, Object>() {
-//            private int count = 0;
-//
-//            @Override
-//            public Object apply(Object object) {
-//                ++count;
-//                if (count > 2) {
-//                    throw new RuntimeException();
-//                }
-//                return object;
-//            }
-//        };
-//
-//        Consumer<Object> onNext = new Consumer<Object>() {
-//
-//            @Override
-//            public void accept(Object object) {
-//                System.out.println(object.toString());
-//            }
-//        };
-//
-//        try {
-//            Observable.create(creator).flatMap(manyMapper).map(mapper).subscribe(onNext);
-//        } catch (RuntimeException e) {
-//            e.printStackTrace();
-//            throw e;
-//        }
-//    }
-
     private static Map<String, String> getMap(String prefix) {
         Map<String, String> m = new HashMap<String, String>();
         m.put("firstName", prefix + "First");
@@ -317,15 +270,15 @@ public class FlowableMapTest {
     @Test//(expected = OnErrorNotImplementedException.class)
     @Ignore("RS subscribers can't throw")
     public void testShouldNotSwallowOnErrorNotImplementedException() {
-//        Observable.just("a", "b").flatMap(new Function<String, Observable<String>>() {
+//        Flowable.just("a", "b").flatMap(new Function<String, Flowable<String>>() {
 //            @Override
-//            public Observable<String> apply(String s) {
-//                return Observable.just(s + "1", s + "2");
+//            public Flowable<String> apply(String s) {
+//                return Flowable.just(s + "1", s + "2");
 //            }
-//        }).flatMap(new Function<String, Observable<String>>() {
+//        }).flatMap(new Function<String, Flowable<String>>() {
 //            @Override
-//            public Observable<String> apply(String s) {
-//                return Observable.error(new Exception("test"));
+//            public Flowable<String> apply(String s) {
+//                return Flowable.error(new Exception("test"));
 //            }
 //        }).forEach(new Consumer<String>() {
 //            @Override
@@ -339,22 +292,22 @@ public class FlowableMapTest {
     @Ignore("RS subscribers can't throw")
     public void verifyExceptionIsThrownIfThereIsNoExceptionHandler() {
 //
-//        Observable.OnSubscribe<Object> creator = new Observable.OnSubscribe<Object>() {
+//        Flowable.OnSubscribe<Object> creator = new Flowable.OnSubscribe<Object>() {
 //
 //            @Override
-//            public void call(Subscriber<? super Object> observer) {
-//                observer.onNext("a");
-//                observer.onNext("b");
-//                observer.onNext("c");
-//                observer.onComplete();
+//            public void call(Subscriber<? super Object> subscriber) {
+//                subscriber.onNext("a");
+//                subscriber.onNext("b");
+//                subscriber.onNext("c");
+//                subscriber.onComplete();
 //            }
 //        };
 //
-//        Func1<Object, Observable<Object>> manyMapper = new Func1<Object, Observable<Object>>() {
+//        Func1<Object, Flowable<Object>> manyMapper = new Func1<Object, Flowable<Object>>() {
 //
 //            @Override
-//            public Observable<Object> call(Object object) {
-//                return Observable.just(object);
+//            public Flowable<Object> call(Object object) {
+//                return Flowable.just(object);
 //            }
 //        };
 //
@@ -380,7 +333,7 @@ public class FlowableMapTest {
 //        };
 //
 //        try {
-//            Observable.create(creator).flatMap(manyMapper).map(mapper).subscribe(onNext);
+//            Flowable.create(creator).flatMap(manyMapper).map(mapper).subscribe(onNext);
 //        } catch (RuntimeException e) {
 //            e.printStackTrace();
 //            throw e;
@@ -390,22 +343,22 @@ public class FlowableMapTest {
     @Test
     public void functionCrashUnsubscribes() {
 
-        PublishProcessor<Integer> ps = PublishProcessor.create();
+        PublishProcessor<Integer> pp = PublishProcessor.create();
 
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
 
-        ps.map(new Function<Integer, Integer>() {
+        pp.map(new Function<Integer, Integer>() {
             @Override
             public Integer apply(Integer v) {
                 throw new TestException();
             }
         }).subscribe(ts);
 
-        Assert.assertTrue("Not subscribed?", ps.hasSubscribers());
+        Assert.assertTrue("Not subscribed?", pp.hasSubscribers());
 
-        ps.onNext(1);
+        pp.onNext(1);
 
-        Assert.assertFalse("Subscribed?", ps.hasSubscribers());
+        Assert.assertFalse("Subscribed?", pp.hasSubscribers());
 
         ts.assertError(TestException.class);
     }
@@ -469,7 +422,7 @@ public class FlowableMapTest {
 
     @Test
     public void mapFilterFused() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         Flowable.range(1, 2)
         .map(new Function<Integer, Integer>() {
@@ -487,13 +440,13 @@ public class FlowableMapTest {
         .subscribe(ts);
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.SYNC))
+        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.SYNC))
         .assertResult(2, 3);
     }
 
     @Test
     public void mapFilterFusedHidden() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         Flowable.range(1, 2).hide()
         .map(new Function<Integer, Integer>() {
@@ -511,7 +464,7 @@ public class FlowableMapTest {
         .subscribe(ts);
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.NONE))
+        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.NONE))
         .assertResult(2, 3);
     }
 
@@ -539,7 +492,7 @@ public class FlowableMapTest {
             .test()
             .assertFailure(TestException.class);
 
-            TestHelper.assertError(errors, 0, IOException.class);
+            TestHelper.assertUndeliverable(errors, 0, IOException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -547,7 +500,7 @@ public class FlowableMapTest {
 
     @Test
     public void mapFilterMapperCrashFused() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         Flowable.range(1, 2).hide()
         .map(new Function<Integer, Integer>() {
@@ -565,7 +518,7 @@ public class FlowableMapTest {
         .subscribe(ts);
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.NONE))
+        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.NONE))
         .assertFailure(TestException.class);
     }
 
@@ -599,7 +552,7 @@ public class FlowableMapTest {
            .test()
             .assertFailure(TestException.class);
 
-            TestHelper.assertError(errors, 0, IOException.class);
+            TestHelper.assertUndeliverable(errors, 0, IOException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -607,7 +560,7 @@ public class FlowableMapTest {
 
     @Test
     public void mapFilterFused2() {
-        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueSubscription.ANY);
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
 
         UnicastProcessor<Integer> up = UnicastProcessor.create();
 
@@ -631,7 +584,7 @@ public class FlowableMapTest {
         up.onComplete();
 
         ts.assertOf(SubscriberFusion.<Integer>assertFuseable())
-        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueSubscription.ASYNC))
+        .assertOf(SubscriberFusion.<Integer>assertFusionMode(QueueFuseable.ASYNC))
         .assertResult(2, 3);
     }
 
@@ -666,10 +619,75 @@ public class FlowableMapTest {
             .test()
             .assertFailure(TestException.class);
 
-            TestHelper.assertError(errors, 0, IOException.class);
+            TestHelper.assertUndeliverable(errors, 0, IOException.class);
         } finally {
             RxJavaPlugins.reset();
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.range(1, 5).map(Functions.identity()));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.map(Functions.identity());
+            }
+        });
+    }
+
+    @Test
+    public void fusedSync() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        Flowable.range(1, 5)
+        .map(Functions.<Integer>identity())
+        .subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.SYNC)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void fusedAsync() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        UnicastProcessor<Integer> us = UnicastProcessor.create();
+
+        us
+        .map(Functions.<Integer>identity())
+        .subscribe(ts);
+
+        TestHelper.emit(us, 1, 2, 3, 4, 5);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.ASYNC)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void fusedReject() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY | QueueFuseable.BOUNDARY);
+
+        Flowable.range(1, 5)
+        .map(Functions.<Integer>identity())
+        .subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.NONE)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void badSource() {
+        TestHelper.checkBadSourceFlowable(new Function<Flowable<Object>, Object>() {
+            @Override
+            public Object apply(Flowable<Object> f) throws Exception {
+                return f.map(Functions.identity());
+            }
+        }, false, 1, 1, 1);
     }
 
 }

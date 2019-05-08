@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,15 +23,15 @@ import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableCountSingle<T> extends Single<Long> implements FuseToFlowable<Long> {
 
-    final Publisher<T> source;
+    final Flowable<T> source;
 
-    public FlowableCountSingle(Publisher<T> source) {
+    public FlowableCountSingle(Flowable<T> source) {
         this.source = source;
     }
 
     @Override
-    protected void subscribeActual(SingleObserver<? super Long> s) {
-        source.subscribe(new CountSubscriber(s));
+    protected void subscribeActual(SingleObserver<? super Long> observer) {
+        source.subscribe(new CountSubscriber(observer));
     }
 
     @Override
@@ -39,23 +39,23 @@ public final class FlowableCountSingle<T> extends Single<Long> implements FuseTo
         return RxJavaPlugins.onAssembly(new FlowableCount<T>(source));
     }
 
-    static final class CountSubscriber implements Subscriber<Object>, Disposable {
+    static final class CountSubscriber implements FlowableSubscriber<Object>, Disposable {
 
-        final SingleObserver<? super Long> actual;
+        final SingleObserver<? super Long> downstream;
 
-        Subscription s;
+        Subscription upstream;
 
         long count;
 
-        CountSubscriber(SingleObserver<? super Long> actual) {
-            this.actual = actual;
+        CountSubscriber(SingleObserver<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -67,25 +67,25 @@ public final class FlowableCountSingle<T> extends Single<Long> implements FuseTo
 
         @Override
         public void onError(Throwable t) {
-            s = SubscriptionHelper.CANCELLED;
-            actual.onError(t);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            s = SubscriptionHelper.CANCELLED;
-            actual.onSuccess(count);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onSuccess(count);
         }
 
         @Override
         public void dispose() {
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public boolean isDisposed() {
-            return s == SubscriptionHelper.CANCELLED;
+            return upstream == SubscriptionHelper.CANCELLED;
         }
     }
 }

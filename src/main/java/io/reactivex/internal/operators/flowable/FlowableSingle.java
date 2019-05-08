@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,46 +13,55 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import io.reactivex.plugins.RxJavaPlugins;
+import java.util.NoSuchElementException;
+
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.internal.subscriptions.*;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableSingle<T> extends AbstractFlowableWithUpstream<T, T> {
 
     final T defaultValue;
 
-    public FlowableSingle(Publisher<T> source, T defaultValue) {
+    final boolean failOnEmpty;
+
+    public FlowableSingle(Flowable<T> source, T defaultValue, boolean failOnEmpty) {
         super(source);
         this.defaultValue = defaultValue;
+        this.failOnEmpty = failOnEmpty;
     }
 
     @Override
     protected void subscribeActual(Subscriber<? super T> s) {
-        source.subscribe(new SingleElementSubscriber<T>(s, defaultValue));
+        source.subscribe(new SingleElementSubscriber<T>(s, defaultValue, failOnEmpty));
     }
 
     static final class SingleElementSubscriber<T> extends DeferredScalarSubscription<T>
-    implements Subscriber<T> {
+    implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -5526049321428043809L;
 
         final T defaultValue;
 
-        Subscription s;
+        final boolean failOnEmpty;
+
+        Subscription upstream;
 
         boolean done;
 
-        SingleElementSubscriber(Subscriber<? super T> actual, T defaultValue) {
+        SingleElementSubscriber(Subscriber<? super T> actual, T defaultValue, boolean failOnEmpty) {
             super(actual);
             this.defaultValue = defaultValue;
+            this.failOnEmpty = failOnEmpty;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -64,8 +73,8 @@ public final class FlowableSingle<T> extends AbstractFlowableWithUpstream<T, T> 
             }
             if (value != null) {
                 done = true;
-                s.cancel();
-                actual.onError(new IllegalArgumentException("Sequence contains more than one element!"));
+                upstream.cancel();
+                downstream.onError(new IllegalArgumentException("Sequence contains more than one element!"));
                 return;
             }
             value = t;
@@ -78,7 +87,7 @@ public final class FlowableSingle<T> extends AbstractFlowableWithUpstream<T, T> 
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -93,7 +102,11 @@ public final class FlowableSingle<T> extends AbstractFlowableWithUpstream<T, T> 
                 v = defaultValue;
             }
             if (v == null) {
-                actual.onComplete();
+                if (failOnEmpty) {
+                    downstream.onError(new NoSuchElementException());
+                } else {
+                    downstream.onComplete();
+                }
             } else {
                 complete(v);
             }
@@ -102,7 +115,7 @@ public final class FlowableSingle<T> extends AbstractFlowableWithUpstream<T, T> 
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

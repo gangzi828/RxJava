@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,8 +17,10 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.Subscriber;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.fuseable.SimpleQueue;
+import io.reactivex.exceptions.MissingBackpressureException;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.*;
 
@@ -30,17 +32,19 @@ import io.reactivex.internal.util.*;
  * @param <U> the value type in the queue
  * @param <V> the value type the child subscriber accepts
  */
-public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriberPad4 implements Subscriber<T>, QueueDrain<U, V> {
-    protected final Subscriber<? super V> actual;
-    protected final SimpleQueue<U> queue;
+public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriberPad4 implements FlowableSubscriber<T>, QueueDrain<U, V> {
+
+    protected final Subscriber<? super V> downstream;
+
+    protected final SimplePlainQueue<U> queue;
 
     protected volatile boolean cancelled;
 
     protected volatile boolean done;
     protected Throwable error;
 
-    public QueueDrainSubscriber(Subscriber<? super V> actual, SimpleQueue<U> queue) {
-        this.actual = actual;
+    public QueueDrainSubscriber(Subscriber<? super V> actual, SimplePlainQueue<U> queue) {
+        this.downstream = actual;
         this.queue = queue;
     }
 
@@ -64,10 +68,10 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
     }
 
     protected final void fastPathEmitMax(U value, boolean delayError, Disposable dispose) {
-        final Subscriber<? super V> s = actual;
-        final SimpleQueue<U> q = queue;
+        final Subscriber<? super V> s = downstream;
+        final SimplePlainQueue<U> q = queue;
 
-        if (wip.get() == 0 && wip.compareAndSet(0, 1)) {
+        if (fastEnter()) {
             long r = requested.get();
             if (r != 0L) {
                 if (accept(s, value)) {
@@ -80,7 +84,7 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
                 }
             } else {
                 dispose.dispose();
-                s.onError(new IllegalStateException("Could not emit buffer due to lack of requests"));
+                s.onError(new MissingBackpressureException("Could not emit buffer due to lack of requests"));
                 return;
             }
         } else {
@@ -93,10 +97,10 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
     }
 
     protected final void fastPathOrderedEmitMax(U value, boolean delayError, Disposable dispose) {
-        final Subscriber<? super V> s = actual;
-        final SimpleQueue<U> q = queue;
+        final Subscriber<? super V> s = downstream;
+        final SimplePlainQueue<U> q = queue;
 
-        if (wip.get() == 0 && wip.compareAndSet(0, 1)) {
+        if (fastEnter()) {
             long r = requested.get();
             if (r != 0L) {
                 if (q.isEmpty()) {
@@ -114,7 +118,7 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
             } else {
                 cancelled = true;
                 dispose.dispose();
-                s.onError(new IllegalStateException("Could not emit buffer due to lack of requests"));
+                s.onError(new MissingBackpressureException("Could not emit buffer due to lack of requests"));
                 return;
             }
         } else {
@@ -124,6 +128,11 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
             }
         }
         QueueDrainHelper.drainMaxLoop(q, s, delayError, dispose, this);
+    }
+
+    @Override
+    public boolean accept(Subscriber<? super V> a, U v) {
+        return false;
     }
 
     @Override
@@ -152,11 +161,6 @@ public abstract class QueueDrainSubscriber<T, U, V> extends QueueDrainSubscriber
         }
     }
 
-    public void drain(boolean delayError) {
-        if (enter()) {
-            QueueDrainHelper.drainLoop(queue, actual, delayError, this);
-        }
-    }
 }
 
 // -------------------------------------------------------------------

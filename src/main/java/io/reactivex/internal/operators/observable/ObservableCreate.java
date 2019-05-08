@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -48,7 +48,6 @@ public final class ObservableCreate<T> extends Observable<T> {
     extends AtomicReference<Disposable>
     implements ObservableEmitter<T>, Disposable {
 
-
         private static final long serialVersionUID = -3434801548987643227L;
 
         final Observer<? super T> observer;
@@ -70,6 +69,13 @@ public final class ObservableCreate<T> extends Observable<T> {
 
         @Override
         public void onError(Throwable t) {
+            if (!tryOnError(t)) {
+                RxJavaPlugins.onError(t);
+            }
+        }
+
+        @Override
+        public boolean tryOnError(Throwable t) {
             if (t == null) {
                 t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
             }
@@ -79,9 +85,9 @@ public final class ObservableCreate<T> extends Observable<T> {
                 } finally {
                     dispose();
                 }
-            } else {
-                RxJavaPlugins.onError(t);
+                return true;
             }
+            return false;
         }
 
         @Override
@@ -119,6 +125,11 @@ public final class ObservableCreate<T> extends Observable<T> {
         public boolean isDisposed() {
             return DisposableHelper.isDisposed(get());
         }
+
+        @Override
+        public String toString() {
+            return String.format("%s{%s}", getClass().getSimpleName(), super.toString());
+        }
     }
 
     /**
@@ -136,7 +147,7 @@ public final class ObservableCreate<T> extends Observable<T> {
 
         final AtomicThrowable error;
 
-        final SimpleQueue<T> queue;
+        final SpscLinkedArrayQueue<T> queue;
 
         volatile boolean done;
 
@@ -174,9 +185,15 @@ public final class ObservableCreate<T> extends Observable<T> {
 
         @Override
         public void onError(Throwable t) {
-            if (emitter.isDisposed() || done) {
+            if (!tryOnError(t)) {
                 RxJavaPlugins.onError(t);
-                return;
+            }
+        }
+
+        @Override
+        public boolean tryOnError(Throwable t) {
+            if (emitter.isDisposed() || done) {
+                return false;
             }
             if (t == null) {
                 t = new NullPointerException("onError called with null. Null values are generally not allowed in 2.x operators and sources.");
@@ -184,9 +201,9 @@ public final class ObservableCreate<T> extends Observable<T> {
             if (error.addThrowable(t)) {
                 done = true;
                 drain();
-            } else {
-                RxJavaPlugins.onError(t);
+                return true;
             }
+            return false;
         }
 
         @Override
@@ -206,7 +223,7 @@ public final class ObservableCreate<T> extends Observable<T> {
 
         void drainLoop() {
             ObservableEmitter<T> e = emitter;
-            SimpleQueue<T> q = queue;
+            SpscLinkedArrayQueue<T> q = queue;
             AtomicThrowable error = this.error;
             int missed = 1;
             for (;;) {
@@ -224,15 +241,7 @@ public final class ObservableCreate<T> extends Observable<T> {
                     }
 
                     boolean d = done;
-                    T v;
-
-                    try {
-                        v = q.poll();
-                    } catch (Throwable ex) {
-                        Exceptions.throwIfFatal(ex);
-                        // should never happen
-                        v = null;
-                    }
+                    T v = q.poll();
 
                     boolean empty = v == null;
 
@@ -256,8 +265,8 @@ public final class ObservableCreate<T> extends Observable<T> {
         }
 
         @Override
-        public void setDisposable(Disposable s) {
-            emitter.setDisposable(s);
+        public void setDisposable(Disposable d) {
+            emitter.setDisposable(d);
         }
 
         @Override
@@ -273,6 +282,11 @@ public final class ObservableCreate<T> extends Observable<T> {
         @Override
         public ObservableEmitter<T> serialize() {
             return this;
+        }
+
+        @Override
+        public String toString() {
+            return emitter.toString();
         }
     }
 

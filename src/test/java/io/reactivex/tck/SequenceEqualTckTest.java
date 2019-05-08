@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,9 +23,12 @@ public class SequenceEqualTckTest extends BaseTck<Boolean> {
 
     @Override
     public Publisher<Boolean> createPublisher(final long elements) {
-        return FlowableTck.wrap(
-                Flowable.sequenceEqual(Flowable.range(1, 1000), Flowable.range(1, 1001))
-            );
+        return
+                Flowable.sequenceEqual(
+                        Flowable.range(1, 1000),
+                        Flowable.range(1, 1001))
+                .toFlowable()
+            ;
     }
 
     @Override

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,19 +16,65 @@ package io.reactivex.observers;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.reactivex.CompletableObserver;
+import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.DisposableHelper;
-import io.reactivex.internal.disposables.ListCompositeDisposable;
+import io.reactivex.internal.disposables.*;
 import io.reactivex.internal.functions.ObjectHelper;
+import io.reactivex.internal.util.EndConsumerHelper;
 
 /**
  * An abstract {@link CompletableObserver} that allows asynchronous cancellation of its subscription and associated resources.
  *
  * <p>All pre-implemented final methods are thread-safe.
+ *
+ * <p>Override the protected {@link #onStart()} to perform initialization when this
+ * {@code ResourceCompletableObserver} is subscribed to a source.
+ *
+ * <p>Use the public {@link #dispose()} method to dispose the sequence externally and release
+ * all resources.
+ *
+ * <p>To release the associated resources, one has to call {@link #dispose()}
+ * in {@code onError()} and {@code onComplete()} explicitly.
+ *
+ * <p>Use {@link #add(Disposable)} to associate resources (as {@link io.reactivex.disposables.Disposable Disposable}s)
+ * with this {@code ResourceCompletableObserver} that will be cleaned up when {@link #dispose()} is called.
+ * Removing previously associated resources is not possible but one can create a
+ * {@link io.reactivex.disposables.CompositeDisposable CompositeDisposable}, associate it with this
+ * {@code ResourceCompletableObserver} and then add/remove resources to/from the {@code CompositeDisposable}
+ * freely.
+ *
+ * <p>Like all other consumers, {@code ResourceCompletableObserver} can be subscribed only once.
+ * Any subsequent attempt to subscribe it to a new source will yield an
+ * {@link IllegalStateException} with message {@code "It is not allowed to subscribe with a(n) <class name> multiple times."}.
+ *
+ * <p>Implementation of {@link #onStart()}, {@link #onError(Throwable)}
+ * and {@link #onComplete()} are not allowed to throw any unchecked exceptions.
+ *
+ * <p>Example<pre><code>
+ * Disposable d =
+ *     Completable.complete().delay(1, TimeUnit.SECONDS)
+ *     .subscribeWith(new ResourceCompletableObserver() {
+ *         &#64;Override public void onStart() {
+ *             add(Schedulers.single()
+ *                 .scheduleDirect(() -&gt; System.out.println("Time!"),
+ *                     2, TimeUnit.SECONDS));
+ *         }
+ *         &#64;Override public void onError(Throwable t) {
+ *             t.printStackTrace();
+ *             dispose();
+ *         }
+ *         &#64;Override public void onComplete() {
+ *             System.out.println("Done!");
+ *             dispose();
+ *         }
+ *     });
+ * // ...
+ * d.dispose();
+ * </code></pre>
  */
 public abstract class ResourceCompletableObserver implements CompletableObserver, Disposable {
     /** The active subscription. */
-    private final AtomicReference<Disposable> s = new AtomicReference<Disposable>();
+    private final AtomicReference<Disposable> upstream = new AtomicReference<Disposable>();
 
     /** The resource composite, can never be null. */
     private final ListCompositeDisposable resources = new ListCompositeDisposable();
@@ -40,14 +86,14 @@ public abstract class ResourceCompletableObserver implements CompletableObserver
      *
      * @throws NullPointerException if resource is null
      */
-    public final void add(Disposable resource) {
+    public final void add(@NonNull Disposable resource) {
         ObjectHelper.requireNonNull(resource, "resource is null");
         resources.add(resource);
     }
 
     @Override
-    public final void onSubscribe(Disposable s) {
-        if (DisposableHelper.setOnce(this.s, s)) {
+    public final void onSubscribe(@NonNull Disposable d) {
+        if (EndConsumerHelper.setOnce(this.upstream, d, getClass())) {
             onStart();
         }
     }
@@ -70,7 +116,7 @@ public abstract class ResourceCompletableObserver implements CompletableObserver
      */
     @Override
     public final void dispose() {
-        if (DisposableHelper.dispose(s)) {
+        if (DisposableHelper.dispose(upstream)) {
             resources.dispose();
         }
     }
@@ -81,6 +127,6 @@ public abstract class ResourceCompletableObserver implements CompletableObserver
      */
     @Override
     public final boolean isDisposed() {
-        return DisposableHelper.isDisposed(s.get());
+        return DisposableHelper.isDisposed(upstream.get());
     }
 }

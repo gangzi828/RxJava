@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.*;
@@ -25,17 +26,19 @@ import org.junit.Test;
 import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
-import io.reactivex.disposables.Disposables;
+import io.reactivex.disposables.*;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
+import io.reactivex.subjects.PublishSubject;
 
 public class ObservableRepeatTest {
 
     @Test(timeout = 2000)
     public void testRepetition() {
-        int NUM = 10;
+        int num = 10;
         final AtomicInteger count = new AtomicInteger();
         int value = Observable.unsafeCreate(new ObservableSource<Integer>() {
 
@@ -45,9 +48,9 @@ public class ObservableRepeatTest {
                 o.onComplete();
             }
         }).repeat().subscribeOn(Schedulers.computation())
-        .take(NUM).blockingLast();
+        .take(num).blockingLast();
 
-        assertEquals(NUM, value);
+        assertEquals(num, value);
     }
 
     @Test(timeout = 2000)
@@ -160,20 +163,20 @@ public class ObservableRepeatTest {
                 .repeat(3)
                 .distinct();
 
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
 
-        src.subscribe(ts);
+        src.subscribe(to);
 
-        ts.assertNoErrors();
-        ts.assertTerminated();
-        ts.assertValues(1, 2, 3);
+        to.assertNoErrors();
+        to.assertTerminated();
+        to.assertValues(1, 2, 3);
     }
 
     /** Issue #2844: wrong target of request. */
     @Test(timeout = 3000)
     public void testRepeatRetarget() {
         final List<Integer> concatBase = new ArrayList<Integer>();
-        TestObserver<Integer> ts = new TestObserver<Integer>();
+        TestObserver<Integer> to = new TestObserver<Integer>();
         Observable.just(1, 2)
         .repeat(5)
         .concatMap(new Function<Integer, Observable<Integer>>() {
@@ -185,11 +188,11 @@ public class ObservableRepeatTest {
                         .delay(200, TimeUnit.MILLISECONDS);
             }
         })
-        .subscribe(ts);
+        .subscribe(to);
 
-        ts.awaitTerminalEvent();
-        ts.assertNoErrors();
-        ts.assertNoValues();
+        to.awaitTerminalEvent();
+        to.assertNoErrors();
+        to.assertNoValues();
 
         assertEquals(Arrays.asList(1, 2, 1, 2, 1, 2, 1, 2, 1, 2), concatBase);
     }
@@ -218,4 +221,233 @@ public class ObservableRepeatTest {
         }
     }
 
+    @Test
+    public void repeatUntilError() {
+        Observable.error(new TestException())
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return true;
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void repeatUntilFalse() {
+        Observable.just(1)
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return true;
+            }
+        })
+        .test()
+        .assertResult(1);
+    }
+
+    @Test
+    public void repeatUntilSupplierCrash() {
+        Observable.just(1)
+        .repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class, 1);
+    }
+
+    @Test
+    public void shouldDisposeInnerObservable() {
+      final PublishSubject<Object> subject = PublishSubject.create();
+      final Disposable disposable = Observable.just("Leak")
+          .repeatWhen(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> completions) throws Exception {
+                return completions.switchMap(new Function<Object, ObservableSource<Object>>() {
+                    @Override
+                    public ObservableSource<Object> apply(Object ignore) throws Exception {
+                        return subject;
+                    }
+                });
+            }
+        })
+          .subscribe();
+
+      assertTrue(subject.hasObservers());
+      disposable.dispose();
+      assertFalse(subject.hasObservers());
+    }
+
+    @Test
+    public void testRepeatWhen() {
+        Observable.error(new TestException())
+        .repeatWhen(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> v) throws Exception {
+                return v.delay(10, TimeUnit.SECONDS);
+            }
+        })
+        .test()
+        .awaitDone(5, TimeUnit.SECONDS)
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void whenTake() {
+        Observable.range(1, 3).repeatWhen(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> handler) throws Exception {
+                return handler.take(2);
+            }
+        })
+        .test()
+        .assertResult(1, 2, 3, 1, 2, 3);
+    }
+
+    @Test
+    public void handlerError() {
+        Observable.range(1, 3)
+        .repeatWhen(new Function<Observable<Object>, ObservableSource<Object>>() {
+            @Override
+            public ObservableSource<Object> apply(Observable<Object> v) throws Exception {
+                return v.map(new Function<Object, Object>() {
+                    @Override
+                    public Object apply(Object w) throws Exception {
+                        throw new TestException();
+                    }
+                });
+            }
+        })
+        .test()
+        .assertFailure(TestException.class, 1, 2, 3);
+    }
+
+    @Test
+    public void noCancelPreviousRepeat() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Observable<Integer> source = Observable.just(1).doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        source.repeat(5)
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void noCancelPreviousRepeatUntil() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Observable<Integer> source = Observable.just(1).doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        final AtomicInteger times = new AtomicInteger();
+
+        source.repeatUntil(new BooleanSupplier() {
+            @Override
+            public boolean getAsBoolean() throws Exception {
+                return times.getAndIncrement() == 4;
+            }
+        })
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void noCancelPreviousRepeatWhen() {
+        final AtomicInteger counter = new AtomicInteger();
+
+        Observable<Integer> source = Observable.just(1).doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                counter.getAndIncrement();
+            }
+        });
+
+        final AtomicInteger times = new AtomicInteger();
+
+        source.repeatWhen(new Function<Observable<Object>, ObservableSource<?>>() {
+            @Override
+            public ObservableSource<?> apply(Observable<Object> e) throws Exception {
+                return e.takeWhile(new Predicate<Object>() {
+                    @Override
+                    public boolean test(Object v) throws Exception {
+                        return times.getAndIncrement() < 4;
+                    }
+                });
+            }
+        })
+        .test()
+        .assertResult(1, 1, 1, 1, 1);
+
+        assertEquals(0, counter.get());
+    }
+
+    @Test
+    public void repeatFloodNoSubscriptionError() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+
+        try {
+            final PublishSubject<Integer> source = PublishSubject.create();
+            final PublishSubject<Integer> signaller = PublishSubject.create();
+
+            for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+
+                TestObserver<Integer> to = source.take(1)
+                .repeatWhen(new Function<Observable<Object>, ObservableSource<Integer>>() {
+                    @Override
+                    public ObservableSource<Integer> apply(Observable<Object> v)
+                            throws Exception {
+                        return signaller;
+                    }
+                }).test();
+
+                Runnable r1 = new Runnable() {
+                    @Override
+                    public void run() {
+                        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+                            source.onNext(1);
+                        }
+                    }
+                };
+                Runnable r2 = new Runnable() {
+                    @Override
+                    public void run() {
+                        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+                            signaller.onNext(1);
+                        }
+                    }
+                };
+
+                TestHelper.race(r1, r2);
+
+                to.dispose();
+            }
+
+            if (!errors.isEmpty()) {
+                for (Throwable e : errors) {
+                    e.printStackTrace();
+                }
+                fail(errors + "");
+            }
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
 }

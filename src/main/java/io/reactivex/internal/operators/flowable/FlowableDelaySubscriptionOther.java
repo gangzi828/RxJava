@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,10 +12,12 @@
  */
 package io.reactivex.internal.operators.flowable;
 
+import java.util.concurrent.atomic.*;
+
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
-import io.reactivex.internal.subscriptions.SubscriptionArbiter;
+import io.reactivex.*;
+import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
 /**
@@ -35,74 +37,105 @@ public final class FlowableDelaySubscriptionOther<T, U> extends Flowable<T> {
 
     @Override
     public void subscribeActual(final Subscriber<? super T> child) {
-        final SubscriptionArbiter serial = new SubscriptionArbiter();
-        child.onSubscribe(serial);
+        MainSubscriber<T> parent = new MainSubscriber<T>(child, main);
+        child.onSubscribe(parent);
+        other.subscribe(parent.other);
+    }
 
-        Subscriber<U> otherSubscriber = new Subscriber<U>() {
-            boolean done;
+    static final class MainSubscriber<T> extends AtomicLong implements FlowableSubscriber<T>, Subscription {
 
-            @Override
-            public void onSubscribe(final Subscription s) {
-                serial.setSubscription(new Subscription() {
-                    @Override
-                    public void request(long n) {
-                        // ignored
-                    }
+        private static final long serialVersionUID = 2259811067697317255L;
 
-                    @Override
-                    public void cancel() {
-                        s.cancel();
-                    }
-                });
-                s.request(Long.MAX_VALUE);
+        final Subscriber<? super T> downstream;
+
+        final Publisher<? extends T> main;
+
+        final OtherSubscriber other;
+
+        final AtomicReference<Subscription> upstream;
+
+        MainSubscriber(Subscriber<? super T> downstream, Publisher<? extends T> main) {
+            this.downstream = downstream;
+            this.main = main;
+            this.other = new OtherSubscriber();
+            this.upstream = new AtomicReference<Subscription>();
+        }
+
+        void next() {
+            main.subscribe(this);
+        }
+
+        @Override
+        public void onNext(T t) {
+            downstream.onNext(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            downstream.onError(t);
+        }
+
+        @Override
+        public void onComplete() {
+            downstream.onComplete();
+        }
+
+        @Override
+        public void request(long n) {
+            if (SubscriptionHelper.validate(n)) {
+                SubscriptionHelper.deferredRequest(upstream, this, n);
             }
+        }
+
+        @Override
+        public void cancel() {
+            SubscriptionHelper.cancel(other);
+            SubscriptionHelper.cancel(upstream);
+        }
+
+        @Override
+        public void onSubscribe(Subscription s) {
+            SubscriptionHelper.deferredSetOnce(upstream, this, s);
+        }
+
+        final class OtherSubscriber extends AtomicReference<Subscription> implements FlowableSubscriber<Object> {
+
+            private static final long serialVersionUID = -3892798459447644106L;
 
             @Override
-            public void onNext(U t) {
-                onComplete();
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                if (done) {
-                    RxJavaPlugins.onError(e);
-                    return;
+            public void onSubscribe(Subscription s) {
+                if (SubscriptionHelper.setOnce(this, s)) {
+                    s.request(Long.MAX_VALUE);
                 }
-                done = true;
-                child.onError(e);
+            }
+
+            @Override
+            public void onNext(Object t) {
+                Subscription s = get();
+                if (s != SubscriptionHelper.CANCELLED) {
+                    lazySet(SubscriptionHelper.CANCELLED);
+                    s.cancel();
+                    next();
+                }
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                Subscription s = get();
+                if (s != SubscriptionHelper.CANCELLED) {
+                    downstream.onError(t);
+                } else {
+                    RxJavaPlugins.onError(t);
+                }
             }
 
             @Override
             public void onComplete() {
-                if (done) {
-                    return;
+                Subscription s = get();
+                if (s != SubscriptionHelper.CANCELLED) {
+                    next();
                 }
-                done = true;
-
-                main.subscribe(new Subscriber<T>() {
-                    @Override
-                    public void onSubscribe(Subscription s) {
-                        serial.setSubscription(s);
-                    }
-
-                    @Override
-                    public void onNext(T t) {
-                        child.onNext(t);
-                    }
-
-                    @Override
-                    public void onError(Throwable t) {
-                        child.onError(t);
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        child.onComplete();
-                    }
-                });
             }
-        };
-
-        other.subscribe(otherSubscriber);
-    }
+        }
+}
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -61,13 +61,13 @@ public class SingleFromPublisherTest {
     public void dispose() {
         PublishProcessor<Integer> pp = PublishProcessor.create();
 
-        TestObserver<Integer> ts = Single.fromPublisher(pp).test();
+        TestObserver<Integer> to = Single.fromPublisher(pp).test();
 
         assertTrue(pp.hasSubscribers());
 
         pp.onNext(1);
 
-        ts.cancel();
+        to.cancel();
 
         assertFalse(pp.hasSubscribers());
     }
@@ -101,7 +101,7 @@ public class SingleFromPublisherTest {
             .assertResult(1);
 
             TestHelper.assertError(errors, 0, IllegalStateException.class, "Subscription already set!");
-            TestHelper.assertError(errors, 1, TestException.class);
+            TestHelper.assertUndeliverable(errors, 1, TestException.class);
         } finally {
             RxJavaPlugins.reset();
         }

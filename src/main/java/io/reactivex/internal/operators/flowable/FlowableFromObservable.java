@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,12 +12,10 @@
  */
 package io.reactivex.internal.operators.flowable;
 
-import io.reactivex.Flowable;
-import io.reactivex.Observable;
-import io.reactivex.Observer;
+import org.reactivestreams.*;
+
+import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
 
 public final class FlowableFromObservable<T> extends Flowable<T> {
     private final Observable<T> upstream;
@@ -31,37 +29,39 @@ public final class FlowableFromObservable<T> extends Flowable<T> {
         upstream.subscribe(new SubscriberObserver<T>(s));
     }
 
-    static class SubscriberObserver<T> implements Observer<T>, Subscription {
-        private final Subscriber<? super T> s;
-        private Disposable d;
+    static final class SubscriberObserver<T> implements Observer<T>, Subscription {
+
+        final Subscriber<? super T> downstream;
+
+        Disposable upstream;
 
         SubscriberObserver(Subscriber<? super T> s) {
-            this.s = s;
+            this.downstream = s;
         }
 
         @Override
         public void onComplete() {
-            s.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void onError(Throwable e) {
-            s.onError(e);
+            downstream.onError(e);
         }
 
         @Override
         public void onNext(T value) {
-            s.onNext(value);
+            downstream.onNext(value);
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            this.d = d;
-            s.onSubscribe(this);
+            this.upstream = d;
+            downstream.onSubscribe(this);
         }
 
         @Override public void cancel() {
-            d.dispose();
+            upstream.dispose();
         }
 
         @Override

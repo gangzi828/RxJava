@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.operators.completable;
 import org.junit.Test;
 
 import io.reactivex.*;
+import io.reactivex.functions.Function;
 
 public class CompletableFromPublisherTest {
     @Test(expected = NullPointerException.class)
@@ -47,5 +48,15 @@ public class CompletableFromPublisherTest {
     @Test
     public void dispose() {
         TestHelper.checkDisposed(Completable.fromPublisher(Flowable.just(1)));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowableToCompletable(new Function<Flowable<Object>, Completable>() {
+            @Override
+            public Completable apply(Flowable<Object> f) throws Exception {
+                return Completable.fromPublisher(f);
+            }
+        });
     }
 }

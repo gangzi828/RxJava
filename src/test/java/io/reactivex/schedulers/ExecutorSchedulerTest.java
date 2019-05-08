@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -58,7 +58,6 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
         System.gc();
 
         Thread.sleep(1000);
-
 
         MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
         MemoryUsage memHeap = memoryMXBean.getHeapMemoryUsage();
@@ -189,13 +188,13 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
         Scheduler custom = Schedulers.from(exec);
         Worker w = custom.createWorker();
         try {
-            Disposable s1 = w.schedule(task);
-            Disposable s2 = w.schedule(task);
-            Disposable s3 = w.schedule(task);
+            Disposable d1 = w.schedule(task);
+            Disposable d2 = w.schedule(task);
+            Disposable d3 = w.schedule(task);
 
-            s1.dispose();
-            s2.dispose();
-            s3.dispose();
+            d1.dispose();
+            d2.dispose();
+            d3.dispose();
 
             exec.executeAll();
 
@@ -204,6 +203,7 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
             w.dispose();
         }
     }
+
     @Test
     public void testCancelledWorkerDoesntRunTasks() {
         final AtomicInteger calls = new AtomicInteger();
@@ -258,11 +258,11 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
 //        };
 //        ExecutorWorker w = (ExecutorWorker)Schedulers.from(e).createWorker();
 //
-//        Disposable s = w.schedule(Functions.emptyRunnable(), 1, TimeUnit.DAYS);
+//        Disposable task = w.schedule(Functions.emptyRunnable(), 1, TimeUnit.DAYS);
 //
 //        assertTrue(w.tasks.hasSubscriptions());
 //
-//        s.dispose();
+//        task.dispose();
 //
 //        assertFalse(w.tasks.hasSubscriptions());
 //    }
@@ -285,13 +285,13 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
 //            }
 //        };
 //
-//        Disposable s = w.schedulePeriodically(action, 0, 1, TimeUnit.DAYS);
+//        Disposable task = w.schedulePeriodically(action, 0, 1, TimeUnit.DAYS);
 //
 //        assertTrue(w.tasks.hasSubscriptions());
 //
 //        cdl.await();
 //
-//        s.dispose();
+//        task.dispose();
 //
 //        assertFalse(w.tasks.hasSubscriptions());
 //    }
@@ -345,9 +345,9 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
 
             assertSame(EmptyDisposable.INSTANCE, s.schedulePeriodicallyDirect(Functions.EMPTY_RUNNABLE, 10, 10, TimeUnit.MILLISECONDS));
 
-            TestHelper.assertError(errors, 0, RejectedExecutionException.class);
-            TestHelper.assertError(errors, 1, RejectedExecutionException.class);
-            TestHelper.assertError(errors, 2, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 0, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 1, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 2, RejectedExecutionException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -370,9 +370,9 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
             s = Schedulers.from(exec).createWorker();
             assertSame(EmptyDisposable.INSTANCE, s.schedulePeriodically(Functions.EMPTY_RUNNABLE, 10, 10, TimeUnit.MILLISECONDS));
 
-            TestHelper.assertError(errors, 0, RejectedExecutionException.class);
-            TestHelper.assertError(errors, 1, RejectedExecutionException.class);
-            TestHelper.assertError(errors, 2, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 0, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 1, RejectedExecutionException.class);
+            TestHelper.assertUndeliverable(errors, 2, RejectedExecutionException.class);
         } finally {
             RxJavaPlugins.reset();
         }
@@ -445,5 +445,138 @@ public class ExecutorSchedulerTest extends AbstractSchedulerConcurrencyTests {
         }
 
         assertTrue(s.isDisposed());
+    }
+
+    @Test
+    public void disposeRace() {
+        ExecutorService exec = Executors.newSingleThreadExecutor();
+        final Scheduler s = Schedulers.from(exec);
+        try {
+            for (int i = 0; i < 500; i++) {
+                final Worker w = s.createWorker();
+
+                final AtomicInteger c = new AtomicInteger(2);
+
+                w.schedule(new Runnable() {
+                    @Override
+                    public void run() {
+                        c.decrementAndGet();
+                        while (c.get() != 0) { }
+                    }
+                });
+
+                c.decrementAndGet();
+                while (c.get() != 0) { }
+                w.dispose();
+            }
+        } finally {
+            exec.shutdownNow();
+        }
+    }
+
+    @Test
+    public void runnableDisposed() {
+        final Scheduler s = Schedulers.from(new Executor() {
+            @Override
+            public void execute(Runnable r) {
+                r.run();
+            }
+        });
+        Disposable d = s.scheduleDirect(Functions.EMPTY_RUNNABLE);
+
+        assertTrue(d.isDisposed());
+    }
+
+    @Test(timeout = 1000)
+    public void runnableDisposedAsync() throws Exception {
+        final Scheduler s = Schedulers.from(new Executor() {
+            @Override
+            public void execute(Runnable r) {
+                new Thread(r).start();
+            }
+        });
+        Disposable d = s.scheduleDirect(Functions.EMPTY_RUNNABLE);
+
+        while (!d.isDisposed()) {
+            Thread.sleep(1);
+        }
+    }
+
+    @Test(timeout = 1000)
+    public void runnableDisposedAsync2() throws Exception {
+        final Scheduler s = Schedulers.from(executor);
+        Disposable d = s.scheduleDirect(Functions.EMPTY_RUNNABLE);
+
+        while (!d.isDisposed()) {
+            Thread.sleep(1);
+        }
+    }
+
+    @Test(timeout = 1000)
+    public void runnableDisposedAsyncCrash() throws Exception {
+        final Scheduler s = Schedulers.from(new Executor() {
+            @Override
+            public void execute(Runnable r) {
+                new Thread(r).start();
+            }
+        });
+        Disposable d = s.scheduleDirect(new Runnable() {
+            @Override
+            public void run() {
+                throw new IllegalStateException();
+            }
+        });
+
+        while (!d.isDisposed()) {
+            Thread.sleep(1);
+        }
+    }
+
+    @Test(timeout = 1000)
+    public void runnableDisposedAsyncTimed() throws Exception {
+        final Scheduler s = Schedulers.from(new Executor() {
+            @Override
+            public void execute(Runnable r) {
+                new Thread(r).start();
+            }
+        });
+        Disposable d = s.scheduleDirect(Functions.EMPTY_RUNNABLE, 1, TimeUnit.MILLISECONDS);
+
+        while (!d.isDisposed()) {
+            Thread.sleep(1);
+        }
+    }
+
+    @Test(timeout = 1000)
+    public void runnableDisposedAsyncTimed2() throws Exception {
+        ExecutorService executorScheduler = Executors.newScheduledThreadPool(1, new RxThreadFactory("TestCustomPoolTimed"));
+        try {
+            final Scheduler s = Schedulers.from(executorScheduler);
+            Disposable d = s.scheduleDirect(Functions.EMPTY_RUNNABLE, 1, TimeUnit.MILLISECONDS);
+
+            while (!d.isDisposed()) {
+                Thread.sleep(1);
+            }
+        } finally {
+            executorScheduler.shutdownNow();
+        }
+    }
+
+    @Test
+    public void unwrapScheduleDirectTaskAfterDispose() {
+        Scheduler scheduler = getScheduler();
+        final CountDownLatch cdl = new CountDownLatch(1);
+        Runnable countDownRunnable = new Runnable() {
+            @Override
+            public void run() {
+                cdl.countDown();
+            }
+        };
+        Disposable disposable = scheduler.scheduleDirect(countDownRunnable, 100, TimeUnit.MILLISECONDS);
+        SchedulerRunnableIntrospection wrapper = (SchedulerRunnableIntrospection) disposable;
+        assertSame(countDownRunnable, wrapper.getWrappedRunnable());
+        disposable.dispose();
+
+        assertSame(Functions.EMPTY_RUNNABLE, wrapper.getWrappedRunnable());
     }
 }

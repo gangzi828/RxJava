@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.exceptions.MissingBackpressureException;
 import org.junit.Test;
 
 import io.reactivex.*;
@@ -47,5 +48,32 @@ public class ObservableToXTest {
         ts.request(1);
         ts
         .assertResult(5);
+    }
+
+    @Test
+    public void toFlowableError1() {
+        Observable.range(1, 5)
+        .toFlowable(BackpressureStrategy.ERROR)
+        .test(1)
+        .assertFailure(MissingBackpressureException.class, 1);
+    }
+
+    @Test
+    public void toFlowableError2() {
+        Observable.range(1, 5)
+        .toFlowable(BackpressureStrategy.ERROR)
+        .test(5)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void toFlowableMissing() {
+        TestSubscriber<Integer> ts = Observable.range(1, 5)
+                .toFlowable(BackpressureStrategy.MISSING)
+                .test(0);
+
+        ts.request(2);
+        ts
+        .assertResult(1, 2, 3, 4, 5);
     }
 }

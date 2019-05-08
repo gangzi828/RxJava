@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -27,7 +27,7 @@ import io.reactivex.schedulers.Schedulers;
 public class ObservableErrorHandlingTests {
 
     /**
-     * Test that an error from a user provided Observer.onNext is handled and emitted to the onError
+     * Test that an error from a user provided Observer.onNext is handled and emitted to the onError.
      * @throws InterruptedException if the test is interrupted
      */
     @Test
@@ -63,7 +63,7 @@ public class ObservableErrorHandlingTests {
 
     /**
      * Test that an error from a user provided Observer.onNext is handled and emitted to the onError
-     * even when done across thread boundaries with observeOn
+     * even when done across thread boundaries with observeOn.
      * @throws InterruptedException if the test is interrupted
      */
     @Test

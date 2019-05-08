@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,9 +18,10 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Scheduler;
+import io.reactivex.*;
 import io.reactivex.Scheduler.Worker;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.exceptions.MissingBackpressureException;
 import io.reactivex.internal.disposables.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
@@ -32,7 +33,7 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
     final TimeUnit unit;
     final Scheduler scheduler;
 
-    public FlowableDebounceTimed(Publisher<T> source, long timeout, TimeUnit unit, Scheduler scheduler) {
+    public FlowableDebounceTimed(Flowable<T> source, long timeout, TimeUnit unit, Scheduler scheduler) {
         super(source);
         this.timeout = timeout;
         this.unit = unit;
@@ -47,24 +48,24 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
     }
 
     static final class DebounceTimedSubscriber<T> extends AtomicLong
-    implements Subscriber<T>, Subscription {
+    implements FlowableSubscriber<T>, Subscription {
 
         private static final long serialVersionUID = -9102637559663639004L;
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
         final long timeout;
         final TimeUnit unit;
         final Scheduler.Worker worker;
 
-        Subscription s;
+        Subscription upstream;
 
-        final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
+        Disposable timer;
 
         volatile long index;
 
         boolean done;
 
         DebounceTimedSubscriber(Subscriber<? super T> actual, long timeout, TimeUnit unit, Worker worker) {
-            this.actual = actual;
+            this.downstream = actual;
             this.timeout = timeout;
             this.unit = unit;
             this.worker = worker;
@@ -72,9 +73,9 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -87,18 +88,14 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
             long idx = index + 1;
             index = idx;
 
-            Disposable d = timer.get();
+            Disposable d = timer;
             if (d != null) {
                 d.dispose();
             }
 
             DebounceEmitter<T> de = new DebounceEmitter<T>(t, idx, this);
-            if (!timer.compareAndSet(d, de)) {
-                return;
-            }
-
+            timer = de;
             d = worker.schedule(de, timeout, unit);
-
             de.setResource(d);
         }
 
@@ -109,8 +106,12 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
                 return;
             }
             done = true;
-            DisposableHelper.dispose(timer);
-            actual.onError(t);
+            Disposable d = timer;
+            if (d != null) {
+                d.dispose();
+            }
+            downstream.onError(t);
+            worker.dispose();
         }
 
         @Override
@@ -120,15 +121,19 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
             }
             done = true;
 
-            Disposable d = timer.get();
-            if (!DisposableHelper.isDisposed(d)) {
-                @SuppressWarnings("unchecked")
-                DebounceEmitter<T> de = (DebounceEmitter<T>)d;
-                de.emit();
-                DisposableHelper.dispose(timer);
-                worker.dispose();
-                actual.onComplete();
+            Disposable d = timer;
+            if (d != null) {
+                d.dispose();
             }
+
+            @SuppressWarnings("unchecked")
+            DebounceEmitter<T> de = (DebounceEmitter<T>)d;
+            if (de != null) {
+                de.emit();
+            }
+
+            downstream.onComplete();
+            worker.dispose();
         }
 
         @Override
@@ -140,24 +145,21 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
 
         @Override
         public void cancel() {
-            DisposableHelper.dispose(timer);
+            upstream.cancel();
             worker.dispose();
-            s.cancel();
         }
 
         void emit(long idx, T t, DebounceEmitter<T> emitter) {
             if (idx == index) {
                 long r = get();
                 if (r != 0L) {
-                    actual.onNext(t);
-                    if (r != Long.MAX_VALUE) {
-                        decrementAndGet();
-                    }
+                    downstream.onNext(t);
+                    BackpressureHelper.produced(this, 1);
 
                     emitter.dispose();
                 } else {
                     cancel();
-                    actual.onError(new IllegalStateException("Could not deliver value due to lack of requests"));
+                    downstream.onError(new MissingBackpressureException("Could not deliver value due to lack of requests"));
                 }
             }
         }
@@ -172,7 +174,6 @@ public final class FlowableDebounceTimed<T> extends AbstractFlowableWithUpstream
         final DebounceTimedSubscriber<T> parent;
 
         final AtomicBoolean once = new AtomicBoolean();
-
 
         DebounceEmitter(T value, long idx, DebounceTimedSubscriber<T> parent) {
             this.value = value;

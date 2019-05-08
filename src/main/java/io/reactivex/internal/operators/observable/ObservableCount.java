@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -28,33 +28,32 @@ public final class ObservableCount<T> extends AbstractObservableWithUpstream<T, 
     }
 
     static final class CountObserver implements Observer<Object>, Disposable {
-        final Observer<? super Long> actual;
+        final Observer<? super Long> downstream;
 
-        Disposable s;
+        Disposable upstream;
 
         long count;
 
-        CountObserver(Observer<? super Long> actual) {
-            this.actual = actual;
+        CountObserver(Observer<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
 
         @Override
@@ -64,13 +63,13 @@ public final class ObservableCount<T> extends AbstractObservableWithUpstream<T, 
 
         @Override
         public void onError(Throwable t) {
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            actual.onNext(count);
-            actual.onComplete();
+            downstream.onNext(count);
+            downstream.onComplete();
         }
     }
 }

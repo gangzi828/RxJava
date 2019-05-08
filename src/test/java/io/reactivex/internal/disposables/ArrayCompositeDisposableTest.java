@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,7 +19,6 @@ import org.junit.Test;
 
 import io.reactivex.TestHelper;
 import io.reactivex.disposables.*;
-import io.reactivex.schedulers.Schedulers;
 
 public class ArrayCompositeDisposableTest {
 
@@ -70,7 +69,7 @@ public class ArrayCompositeDisposableTest {
 
     @Test
     public void disposeRace() {
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final ArrayCompositeDisposable acd = new ArrayCompositeDisposable(2);
 
             Runnable r = new Runnable() {
@@ -80,13 +79,13 @@ public class ArrayCompositeDisposableTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 
     @Test
     public void replaceRace() {
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final ArrayCompositeDisposable acd = new ArrayCompositeDisposable(2);
 
             Runnable r = new Runnable() {
@@ -96,13 +95,13 @@ public class ArrayCompositeDisposableTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 
     @Test
     public void setRace() {
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final ArrayCompositeDisposable acd = new ArrayCompositeDisposable(2);
 
             Runnable r = new Runnable() {
@@ -112,7 +111,7 @@ public class ArrayCompositeDisposableTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.io());
+            TestHelper.race(r, r);
         }
     }
 

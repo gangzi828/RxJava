@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,8 +18,7 @@ import static org.junit.Assert.*;
 import org.junit.Test;
 
 import io.reactivex.TestHelper;
-import io.reactivex.internal.fuseable.QueueSubscription;
-import io.reactivex.schedulers.Schedulers;
+import io.reactivex.internal.fuseable.QueueFuseable;
 import io.reactivex.subscribers.TestSubscriber;
 
 public class DeferredScalarSubscriptionTest {
@@ -28,7 +27,7 @@ public class DeferredScalarSubscriptionTest {
     public void queueSubscriptionSyncRejected() {
         DeferredScalarSubscription<Integer> ds = new DeferredScalarSubscription<Integer>(new TestSubscriber<Integer>());
 
-        assertEquals(QueueSubscription.NONE, ds.requestFusion(QueueSubscription.SYNC));
+        assertEquals(QueueFuseable.NONE, ds.requestFusion(QueueFuseable.SYNC));
     }
 
     @Test
@@ -54,7 +53,7 @@ public class DeferredScalarSubscriptionTest {
 
     @Test
     public void completeCancelRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final DeferredScalarSubscription<Integer> ds = new DeferredScalarSubscription<Integer>(new TestSubscriber<Integer>());
 
             Runnable r1 = new Runnable() {
@@ -71,13 +70,13 @@ public class DeferredScalarSubscriptionTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
     @Test
     public void requestClearRace() {
-        for (int i = 0; i < 5000; i++) {
+        for (int i = 0; i < TestHelper.RACE_LONG_LOOPS; i++) {
             TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0L);
 
             final DeferredScalarSubscription<Integer> ds = new DeferredScalarSubscription<Integer>(ts);
@@ -98,7 +97,7 @@ public class DeferredScalarSubscriptionTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
 
             if (ts.valueCount() >= 1) {
                 ts.assertValue(1);
@@ -108,7 +107,7 @@ public class DeferredScalarSubscriptionTest {
 
     @Test
     public void requestCancelRace() {
-        for (int i = 0; i < 5000; i++) {
+        for (int i = 0; i < TestHelper.RACE_LONG_LOOPS; i++) {
             TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0L);
 
             final DeferredScalarSubscription<Integer> ds = new DeferredScalarSubscription<Integer>(ts);
@@ -129,7 +128,7 @@ public class DeferredScalarSubscriptionTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
 
             if (ts.valueCount() >= 1) {
                 ts.assertValue(1);

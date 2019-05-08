@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
@@ -44,7 +44,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
     final BiFunction<? super TLeft, ? super Flowable<TRight>, ? extends R> resultSelector;
 
     public FlowableGroupJoin(
-            Publisher<TLeft> source,
+            Flowable<TLeft> source,
             Publisher<? extends TRight> other,
             Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
             Function<? super TRight, ? extends Publisher<TRightEnd>> rightEnd,
@@ -89,10 +89,9 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
     static final class GroupJoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>
     extends AtomicInteger implements Subscription, JoinSupport {
 
-
         private static final long serialVersionUID = -6071216598687999801L;
 
-        final Subscriber<? super R> actual;
+        final Subscriber<? super R> downstream;
 
         final AtomicLong requested;
 
@@ -131,7 +130,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
         GroupJoinSubscription(Subscriber<? super R> actual, Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
                 Function<? super TRight, ? extends Publisher<TRightEnd>> rightEnd,
                         BiFunction<? super TLeft, ? super Flowable<TRight>, ? extends R> resultSelector) {
-            this.actual = actual;
+            this.downstream = actual;
             this.requested = new AtomicLong();
             this.disposables = new CompositeDisposable();
             this.queue = new SpscLinkedArrayQueue<Object>(bufferSize());
@@ -195,7 +194,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
             int missed = 1;
             SpscLinkedArrayQueue<Object> q = queue;
-            Subscriber<? super R> a = actual;
+            Subscriber<? super R> a = downstream;
 
             for (;;) {
                 for (;;) {
@@ -392,7 +391,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
     static final class LeftRightSubscriber
     extends AtomicReference<Subscription>
-    implements Subscriber<Object>, Disposable {
+    implements FlowableSubscriber<Object>, Disposable {
 
         private static final long serialVersionUID = 1883890389173668373L;
 
@@ -412,14 +411,12 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
         @Override
         public boolean isDisposed() {
-            return SubscriptionHelper.isCancelled(get());
+            return get() == SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this, s)) {
-                s.request(Long.MAX_VALUE);
-            }
+            SubscriptionHelper.setOnce(this, s, Long.MAX_VALUE);
         }
 
         @Override
@@ -441,7 +438,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
     static final class LeftRightEndSubscriber
     extends AtomicReference<Subscription>
-    implements Subscriber<Object>, Disposable {
+    implements FlowableSubscriber<Object>, Disposable {
 
         private static final long serialVersionUID = 1883890389173668373L;
 
@@ -465,14 +462,12 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
         @Override
         public boolean isDisposed() {
-            return SubscriptionHelper.isCancelled(get());
+            return get() == SubscriptionHelper.CANCELLED;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.setOnce(this, s)) {
-                s.request(Long.MAX_VALUE);
-            }
+            SubscriptionHelper.setOnce(this, s, Long.MAX_VALUE);
         }
 
         @Override
@@ -484,7 +479,7 @@ public final class FlowableGroupJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> exte
 
         @Override
         public void onError(Throwable t) {
-            parent.innerError(t);
+            parent.innerCloseError(t);
         }
 
         @Override

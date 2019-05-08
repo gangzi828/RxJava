@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import io.reactivex.internal.functions.ObjectHelper;
 import java.util.concurrent.Callable;
 
 import io.reactivex.*;
@@ -24,18 +25,16 @@ public final class ObservableError<T> extends Observable<T> {
     public ObservableError(Callable<? extends Throwable> errorSupplier) {
         this.errorSupplier = errorSupplier;
     }
+
     @Override
-    public void subscribeActual(Observer<? super T> s) {
+    public void subscribeActual(Observer<? super T> observer) {
         Throwable error;
         try {
-            error = errorSupplier.call();
+            error = ObjectHelper.requireNonNull(errorSupplier.call(), "Callable returned null throwable. Null values are generally not allowed in 2.x operators and sources.");
         } catch (Throwable t) {
             Exceptions.throwIfFatal(t);
             error = t;
         }
-        if (error == null) {
-            error = new NullPointerException("Callable returned null throwable. Null values are generally not allowed in 2.x operators and sources.");
-        }
-        EmptyDisposable.error(error, s);
+        EmptyDisposable.error(error, observer);
     }
 }

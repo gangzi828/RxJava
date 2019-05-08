@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,10 +24,11 @@ import io.reactivex.schedulers.Schedulers;
  * {@linkplain #NONE not using a scheduler} and {@linkplain #CUSTOM a manually-specified scheduler}.
  * Libraries providing their own values should namespace them with their base package name followed
  * by a colon ({@code :}) and then a human-readable name (e.g., {@code com.example:ui-thread}).
+ * @since 2.0
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@Target({ElementType.METHOD, ElementType.TYPE})
+@Target({ElementType.CONSTRUCTOR, ElementType.METHOD, ElementType.TYPE})
 public @interface SchedulerSupport {
     /**
      * A special value indicating the operator/class doesn't use schedulers.
@@ -59,6 +60,13 @@ public @interface SchedulerSupport {
      * or takes timing information from it.
      */
     String TRAMPOLINE = "io.reactivex:trampoline";
+    /**
+     * The operator/class runs on RxJava's {@linkplain Schedulers#single() single scheduler}
+     * or takes timing information from it.
+     * <p>History: 2.0.8 - experimental
+     * @since 2.2
+     */
+    String SINGLE = "io.reactivex:single";
 
     /**
      * The kind of scheduler the class or method uses.

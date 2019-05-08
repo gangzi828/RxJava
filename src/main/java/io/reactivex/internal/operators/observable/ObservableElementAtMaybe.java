@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -26,6 +26,7 @@ public final class ObservableElementAtMaybe<T> extends Maybe<T> implements FuseT
         this.source = source;
         this.index = index;
     }
+
     @Override
     public void subscribeActual(MaybeObserver<? super T> t) {
         source.subscribe(new ElementAtObserver<T>(t, index));
@@ -33,43 +34,41 @@ public final class ObservableElementAtMaybe<T> extends Maybe<T> implements FuseT
 
     @Override
     public Observable<T> fuseToObservable() {
-        return RxJavaPlugins.onAssembly(new ObservableElementAt<T>(source, index, null));
+        return RxJavaPlugins.onAssembly(new ObservableElementAt<T>(source, index, null, false));
     }
 
     static final class ElementAtObserver<T> implements Observer<T>, Disposable {
-        final MaybeObserver<? super T> actual;
+        final MaybeObserver<? super T> downstream;
         final long index;
 
-        Disposable s;
+        Disposable upstream;
 
         long count;
 
         boolean done;
 
         ElementAtObserver(MaybeObserver<? super T> actual, long index) {
-            this.actual = actual;
+            this.downstream = actual;
             this.index = index;
         }
 
         @Override
-        public void onSubscribe(Disposable s) {
-            if (DisposableHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                downstream.onSubscribe(this);
             }
         }
 
-
         @Override
         public void dispose() {
-            s.dispose();
+            upstream.dispose();
         }
 
         @Override
         public boolean isDisposed() {
-            return s.isDisposed();
+            return upstream.isDisposed();
         }
-
 
         @Override
         public void onNext(T t) {
@@ -79,8 +78,8 @@ public final class ObservableElementAtMaybe<T> extends Maybe<T> implements FuseT
             long c = count;
             if (c == index) {
                 done = true;
-                s.dispose();
-                actual.onSuccess(t);
+                upstream.dispose();
+                downstream.onSuccess(t);
                 return;
             }
             count = c + 1;
@@ -93,14 +92,14 @@ public final class ObservableElementAtMaybe<T> extends Maybe<T> implements FuseT
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
             if (!done) {
                 done = true;
-                actual.onComplete();
+                downstream.onComplete();
             }
         }
     }

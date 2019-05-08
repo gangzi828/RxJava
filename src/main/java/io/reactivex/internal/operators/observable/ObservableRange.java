@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,34 +12,35 @@
  */
 package io.reactivex.internal.operators.observable;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 import io.reactivex.*;
-import io.reactivex.internal.fuseable.QueueDisposable;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.internal.observers.BasicIntQueueDisposable;
 
+/**
+ * Emits a range of integer values from start to end.
+ */
 public final class ObservableRange extends Observable<Integer> {
     private final int start;
-    private final int count;
+    private final long end;
 
     public ObservableRange(int start, int count) {
         this.start = start;
-        this.count = count;
+        this.end = (long)start + count;
     }
 
     @Override
     protected void subscribeActual(Observer<? super Integer> o) {
-        RangeDisposable parent = new RangeDisposable(o, start, (long)start + count);
+        RangeDisposable parent = new RangeDisposable(o, start, end);
         o.onSubscribe(parent);
         parent.run();
     }
 
     static final class RangeDisposable
-    extends AtomicInteger
-    implements QueueDisposable<Integer> {
+    extends BasicIntQueueDisposable<Integer> {
 
         private static final long serialVersionUID = 396518478098735504L;
 
-        final Observer<? super Integer> actual;
+        final Observer<? super Integer> downstream;
 
         final long end;
 
@@ -48,7 +49,7 @@ public final class ObservableRange extends Observable<Integer> {
         boolean fused;
 
         RangeDisposable(Observer<? super Integer> actual, long start, long end) {
-            this.actual = actual;
+            this.downstream = actual;
             this.index = start;
             this.end = end;
         }
@@ -57,7 +58,7 @@ public final class ObservableRange extends Observable<Integer> {
             if (fused) {
                 return;
             }
-            Observer<? super Integer> actual = this.actual;
+            Observer<? super Integer> actual = this.downstream;
             long e = end;
             for (long i = index; i != e && get() == 0; i++) {
                 actual.onNext((int)i);
@@ -68,16 +69,7 @@ public final class ObservableRange extends Observable<Integer> {
             }
         }
 
-        @Override
-        public boolean offer(Integer value) {
-            throw new UnsupportedOperationException("Should not be called!");
-        }
-
-        @Override
-        public boolean offer(Integer v1, Integer v2) {
-            throw new UnsupportedOperationException("Should not be called!");
-        }
-
+        @Nullable
         @Override
         public Integer poll() throws Exception {
             long i = index;

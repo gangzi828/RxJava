@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,34 +14,42 @@
 package io.reactivex.internal.operators.observable;
 
 import io.reactivex.*;
-import io.reactivex.functions.BiPredicate;
+import io.reactivex.annotations.Nullable;
+import io.reactivex.functions.*;
 import io.reactivex.internal.observers.BasicFuseableObserver;
 
-public final class ObservableDistinctUntilChanged<T> extends AbstractObservableWithUpstream<T, T> {
+public final class ObservableDistinctUntilChanged<T, K> extends AbstractObservableWithUpstream<T, T> {
 
-    final BiPredicate<? super T, ? super T> comparer;
+    final Function<? super T, K> keySelector;
 
-    public ObservableDistinctUntilChanged(ObservableSource<T> source, BiPredicate<? super T, ? super T> comparer) {
+    final BiPredicate<? super K, ? super K> comparer;
+
+    public ObservableDistinctUntilChanged(ObservableSource<T> source, Function<? super T, K> keySelector, BiPredicate<? super K, ? super K> comparer) {
         super(source);
+        this.keySelector = keySelector;
         this.comparer = comparer;
     }
 
     @Override
-    protected void subscribeActual(Observer<? super T> s) {
-        source.subscribe(new DistinctUntilChangedObserver<T>(s, comparer));
+    protected void subscribeActual(Observer<? super T> observer) {
+        source.subscribe(new DistinctUntilChangedObserver<T, K>(observer, keySelector, comparer));
     }
 
-    static final class DistinctUntilChangedObserver<T> extends BasicFuseableObserver<T, T> {
+    static final class DistinctUntilChangedObserver<T, K> extends BasicFuseableObserver<T, T> {
 
-        final BiPredicate<? super T, ? super T> comparer;
+        final Function<? super T, K> keySelector;
 
-        T last;
+        final BiPredicate<? super K, ? super K> comparer;
+
+        K last;
 
         boolean hasValue;
 
         DistinctUntilChangedObserver(Observer<? super T> actual,
-                BiPredicate<? super T, ? super T> comparer) {
+                Function<? super T, K> keySelector,
+                BiPredicate<? super K, ? super K> comparer) {
             super(actual);
+            this.keySelector = keySelector;
             this.comparer = comparer;
         }
 
@@ -51,28 +59,30 @@ public final class ObservableDistinctUntilChanged<T> extends AbstractObservableW
                 return;
             }
             if (sourceMode != NONE) {
-                actual.onNext(t);
+                downstream.onNext(t);
                 return;
             }
 
-            if (hasValue) {
-                boolean equal;
-                try {
-                    equal = comparer.test(last, t);
-                } catch (Throwable ex) {
-                    fail(ex);
-                    return;
+            K key;
+
+            try {
+                key = keySelector.apply(t);
+                if (hasValue) {
+                    boolean equal = comparer.test(last, key);
+                    last = key;
+                    if (equal) {
+                        return;
+                    }
+                } else {
+                    hasValue = true;
+                    last = key;
                 }
-                last = t;
-                if (equal) {
-                    return;
-                }
-                actual.onNext(t);
-                return;
+            } catch (Throwable ex) {
+               fail(ex);
+               return;
             }
-            hasValue = true;
-            last = t;
-            actual.onNext(t);
+
+            downstream.onNext(t);
         }
 
         @Override
@@ -80,24 +90,26 @@ public final class ObservableDistinctUntilChanged<T> extends AbstractObservableW
             return transitiveBoundaryFusion(mode);
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             for (;;) {
-                T v = qs.poll();
+                T v = qd.poll();
                 if (v == null) {
                     return null;
                 }
+                K key = keySelector.apply(v);
                 if (!hasValue) {
                     hasValue = true;
-                    last = v;
+                    last = key;
                     return v;
                 }
 
-                if (!comparer.test(last, v)) {
-                    last = v;
+                if (!comparer.test(last, key)) {
+                    last = key;
                     return v;
                 }
-                last = v;
+                last = key;
             }
         }
 

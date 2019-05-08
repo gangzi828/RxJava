@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,6 +24,8 @@ import org.mockito.InOrder;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
+import io.reactivex.Flowable;
+import io.reactivex.exceptions.TestException;
 import io.reactivex.functions.*;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.*;
@@ -35,11 +37,12 @@ public class FlowableTakeLastTest {
         Flowable<String> w = Flowable.empty();
         Flowable<String> take = w.takeLast(2);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, never()).onNext(any(String.class));
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, never()).onNext(any(String.class));
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
@@ -47,14 +50,15 @@ public class FlowableTakeLastTest {
         Flowable<String> w = Flowable.just("one", "two", "three");
         Flowable<String> take = w.takeLast(2);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        InOrder inOrder = inOrder(observer);
-        take.subscribe(observer);
-        inOrder.verify(observer, times(1)).onNext("two");
-        inOrder.verify(observer, times(1)).onNext("three");
-        verify(observer, never()).onNext("one");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        InOrder inOrder = inOrder(subscriber);
+        take.subscribe(subscriber);
+
+        inOrder.verify(subscriber, times(1)).onNext("two");
+        inOrder.verify(subscriber, times(1)).onNext("three");
+        verify(subscriber, never()).onNext("one");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
@@ -62,11 +66,12 @@ public class FlowableTakeLastTest {
         Flowable<String> w = Flowable.just("one");
         Flowable<String> take = w.takeLast(10);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, times(1)).onNext("one");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, times(1)).onNext("one");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
@@ -74,11 +79,12 @@ public class FlowableTakeLastTest {
         Flowable<String> w = Flowable.just("one");
         Flowable<String> take = w.takeLast(0);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, never()).onNext("one");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, never()).onNext("one");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
@@ -87,13 +93,14 @@ public class FlowableTakeLastTest {
         Flowable<String> w = Flowable.just("one", null, "three");
         Flowable<String> take = w.takeLast(2);
 
-        Subscriber<String> observer = TestHelper.mockSubscriber();
-        take.subscribe(observer);
-        verify(observer, never()).onNext("one");
-        verify(observer, times(1)).onNext(null);
-        verify(observer, times(1)).onNext("three");
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        Subscriber<String> subscriber = TestHelper.mockSubscriber();
+        take.subscribe(subscriber);
+
+        verify(subscriber, never()).onNext("one");
+        verify(subscriber, times(1)).onNext(null);
+        verify(subscriber, times(1)).onNext("three");
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
@@ -234,7 +241,6 @@ public class FlowableTakeLastTest {
         });
     }
 
-
     @Test
     public void testIgnoreRequest4() {
         // If `takeLast` does not ignore `request` properly, StackOverflowError will be thrown.
@@ -286,7 +292,7 @@ public class FlowableTakeLastTest {
                 cancel();
             }
         });
-        assertEquals(1,count.get());
+        assertEquals(1, count.get());
     }
 
     @Test(timeout = 10000)
@@ -315,5 +321,37 @@ public class FlowableTakeLastTest {
                 request(Long.MAX_VALUE - 1);
             }});
         assertEquals(50, list.size());
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.range(1, 10).takeLast(5));
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.takeLast(5);
+            }
+        });
+    }
+
+    @Test
+    public void error() {
+        Flowable.error(new TestException())
+        .takeLast(5)
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void takeLastTake() {
+        Flowable.range(1, 10)
+        .takeLast(5)
+        .take(2)
+        .test()
+        .assertResult(6, 7);
     }
 }

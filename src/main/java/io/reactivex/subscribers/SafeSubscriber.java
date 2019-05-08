@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@ package io.reactivex.subscribers;
 
 import org.reactivestreams.*;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.exceptions.*;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -24,28 +25,28 @@ import io.reactivex.plugins.RxJavaPlugins;
  *
  * @param <T> the value type
  */
-public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
+public final class SafeSubscriber<T> implements FlowableSubscriber<T>, Subscription {
     /** The actual Subscriber. */
-    final Subscriber<? super T> actual;
+    final Subscriber<? super T> downstream;
     /** The subscription. */
-    Subscription s;
+    Subscription upstream;
     /** Indicates a terminal state. */
     boolean done;
 
     /**
      * Constructs a SafeSubscriber by wrapping the given actual Subscriber.
-     * @param actual the actual Subscriber to wrap, not null (not validated)
+     * @param downstream the actual Subscriber to wrap, not null (not validated)
      */
-    public SafeSubscriber(Subscriber<? super T> actual) {
-        this.actual = actual;
+    public SafeSubscriber(Subscriber<? super T> downstream) {
+        this.downstream = downstream;
     }
 
     @Override
     public void onSubscribe(Subscription s) {
-        if (SubscriptionHelper.validate(this.s, s)) {
-            this.s = s;
+        if (SubscriptionHelper.validate(this.upstream, s)) {
+            this.upstream = s;
             try {
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 done = true;
@@ -67,7 +68,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         if (done) {
             return;
         }
-        if (s == null) {
+        if (upstream == null) {
             onNextNoSubscription();
             return;
         }
@@ -75,7 +76,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         if (t == null) {
             Throwable ex = new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources.");
             try {
-                s.cancel();
+                upstream.cancel();
             } catch (Throwable e1) {
                 Exceptions.throwIfFatal(e1);
                 onError(new CompositeException(ex, e1));
@@ -86,11 +87,11 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         }
 
         try {
-            actual.onNext(t);
+            downstream.onNext(t);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             try {
-                s.cancel();
+                upstream.cancel();
             } catch (Throwable e1) {
                 Exceptions.throwIfFatal(e1);
                 onError(new CompositeException(e, e1));
@@ -105,7 +106,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         Throwable ex = new NullPointerException("Subscription not set!");
 
         try {
-            actual.onSubscribe(EmptySubscription.INSTANCE);
+            downstream.onSubscribe(EmptySubscription.INSTANCE);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // can't call onError because the actual's state may be corrupt at this point
@@ -113,7 +114,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
             return;
         }
         try {
-            actual.onError(ex);
+            downstream.onError(ex);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // if onError failed, all that's left is to report the error to plugins
@@ -129,11 +130,11 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         }
         done = true;
 
-        if (s == null) {
+        if (upstream == null) {
             Throwable npe = new NullPointerException("Subscription not set!");
 
             try {
-                actual.onSubscribe(EmptySubscription.INSTANCE);
+                downstream.onSubscribe(EmptySubscription.INSTANCE);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 // can't call onError because the actual's state may be corrupt at this point
@@ -141,7 +142,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
                 return;
             }
             try {
-                actual.onError(new CompositeException(t, npe));
+                downstream.onError(new CompositeException(t, npe));
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 // if onError failed, all that's left is to report the error to plugins
@@ -155,7 +156,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         }
 
         try {
-            actual.onError(t);
+            downstream.onError(t);
         } catch (Throwable ex) {
             Exceptions.throwIfFatal(ex);
 
@@ -170,14 +171,13 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         }
         done = true;
 
-        if (s == null) {
+        if (upstream == null) {
             onCompleteNoSubscription();
             return;
         }
 
-
         try {
-            actual.onComplete();
+            downstream.onComplete();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             RxJavaPlugins.onError(e);
@@ -189,7 +189,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
         Throwable ex = new NullPointerException("Subscription not set!");
 
         try {
-            actual.onSubscribe(EmptySubscription.INSTANCE);
+            downstream.onSubscribe(EmptySubscription.INSTANCE);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // can't call onError because the actual's state may be corrupt at this point
@@ -197,7 +197,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
             return;
         }
         try {
-            actual.onError(ex);
+            downstream.onError(ex);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // if onError failed, all that's left is to report the error to plugins
@@ -208,11 +208,11 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
     @Override
     public void request(long n) {
         try {
-            s.request(n);
+            upstream.request(n);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             try {
-                s.cancel();
+                upstream.cancel();
             } catch (Throwable e1) {
                 Exceptions.throwIfFatal(e1);
                 RxJavaPlugins.onError(new CompositeException(e, e1));
@@ -225,7 +225,7 @@ public final class SafeSubscriber<T> implements Subscriber<T>, Subscription {
     @Override
     public void cancel() {
         try {
-            s.cancel();
+            upstream.cancel();
         } catch (Throwable e1) {
             Exceptions.throwIfFatal(e1);
             RxJavaPlugins.onError(e1);

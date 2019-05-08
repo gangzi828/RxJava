@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -32,14 +32,17 @@ import io.reactivex.exceptions.TestException;
 public abstract class BaseTck<T> extends PublisherVerification<T> {
 
     public BaseTck() {
-        super(new TestEnvironment(25L));
+        this(25L);
+    }
+
+    public BaseTck(long timeout) {
+        super(new TestEnvironment(timeout));
     }
 
     @Override
     public Publisher<T> createFailedPublisher() {
         return Flowable.error(new TestException());
     }
-
 
     @Override
     public long maxElementsFromPublisher() {
@@ -48,7 +51,7 @@ public abstract class BaseTck<T> extends PublisherVerification<T> {
 
     /**
      * Creates an Iterable with the specified number of elements or an infinite one if
-     * elements > Integer.MAX_VALUE
+     * elements > Integer.MAX_VALUE.
      * @param elements the number of elements to return, Integer.MAX_VALUE means an infinite sequence
      * @return the Iterable
      */

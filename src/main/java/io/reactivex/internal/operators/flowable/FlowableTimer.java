@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -36,7 +36,7 @@ public final class FlowableTimer extends Flowable<Long> {
 
     @Override
     public void subscribeActual(Subscriber<? super Long> s) {
-        IntervalOnceSubscriber ios = new IntervalOnceSubscriber(s);
+        TimerSubscriber ios = new TimerSubscriber(s);
         s.onSubscribe(ios);
 
         Disposable d = scheduler.scheduleDirect(ios, delay, unit);
@@ -44,17 +44,17 @@ public final class FlowableTimer extends Flowable<Long> {
         ios.setResource(d);
     }
 
-    static final class IntervalOnceSubscriber extends AtomicReference<Disposable>
+    static final class TimerSubscriber extends AtomicReference<Disposable>
     implements Subscription, Runnable {
 
         private static final long serialVersionUID = -2809475196591179431L;
 
-        final Subscriber<? super Long> actual;
+        final Subscriber<? super Long> downstream;
 
         volatile boolean requested;
 
-        IntervalOnceSubscriber(Subscriber<? super Long> actual) {
-            this.actual = actual;
+        TimerSubscriber(Subscriber<? super Long> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
@@ -73,17 +73,18 @@ public final class FlowableTimer extends Flowable<Long> {
         public void run() {
             if (get() != DisposableHelper.DISPOSED) {
                 if (requested) {
-                    actual.onNext(0L);
-                    actual.onComplete();
+                    downstream.onNext(0L);
+                    lazySet(EmptyDisposable.INSTANCE);
+                    downstream.onComplete();
                 } else {
-                    actual.onError(new MissingBackpressureException("Can't deliver value due to lack of requests"));
+                    lazySet(EmptyDisposable.INSTANCE);
+                    downstream.onError(new MissingBackpressureException("Can't deliver value due to lack of requests"));
                 }
-                lazySet(EmptyDisposable.INSTANCE);
             }
         }
 
         public void setResource(Disposable d) {
-            DisposableHelper.setOnce(this, d);
+            DisposableHelper.trySet(this, d);
         }
     }
 }

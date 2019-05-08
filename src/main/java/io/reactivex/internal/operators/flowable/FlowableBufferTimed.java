@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,11 +19,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Scheduler;
+import io.reactivex.*;
 import io.reactivex.Scheduler.Worker;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
-import io.reactivex.internal.disposables.*;
+import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 import io.reactivex.internal.subscribers.QueueDrainSubscriber;
 import io.reactivex.internal.subscriptions.*;
@@ -40,7 +41,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
     final int maxSize;
     final boolean restartTimerOnMaxSize;
 
-    public FlowableBufferTimed(Publisher<T> source, long timespan, long timeskip, TimeUnit unit, Scheduler scheduler, Callable<U> bufferSupplier, int maxSize,
+    public FlowableBufferTimed(Flowable<T> source, long timespan, long timeskip, TimeUnit unit, Scheduler scheduler, Callable<U> bufferSupplier, int maxSize,
             boolean restartTimerOnMaxSize) {
         super(source);
         this.timespan = timespan;
@@ -77,7 +78,6 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
                 bufferSupplier, timespan, timeskip, unit, w));
     }
 
-
     static final class BufferExactUnboundedSubscriber<T, U extends Collection<? super T>>
     extends QueueDrainSubscriber<T, U, U> implements Subscription, Runnable, Disposable {
         final Callable<U> bufferSupplier;
@@ -85,11 +85,9 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
         final TimeUnit unit;
         final Scheduler scheduler;
 
-        Subscription s;
+        Subscription upstream;
 
         U buffer;
-
-        boolean selfCancel;
 
         final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
 
@@ -105,38 +103,31 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (!SubscriptionHelper.validate(this.s, s)) {
-                return;
-            }
-            this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-            U b;
+                U b;
 
-            try {
-                b = bufferSupplier.call();
-            } catch (Throwable e) {
-                Exceptions.throwIfFatal(e);
-                cancel();
-                EmptySubscription.error(e, actual);
-                return;
-            }
+                try {
+                    b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
+                } catch (Throwable e) {
+                    Exceptions.throwIfFatal(e);
+                    cancel();
+                    EmptySubscription.error(e, downstream);
+                    return;
+                }
 
-            if (b == null) {
-                cancel();
-                EmptySubscription.error(new NullPointerException("buffer supplied is null"), actual);
-                return;
-            }
+                buffer = b;
 
-            buffer = b;
+                downstream.onSubscribe(this);
 
-            actual.onSubscribe(this);
+                if (!cancelled) {
+                    s.request(Long.MAX_VALUE);
 
-            if (!cancelled) {
-                s.request(Long.MAX_VALUE);
-
-                Disposable d = scheduler.schedulePeriodicallyDirect(this, timespan, timespan, unit);
-                if (!timer.compareAndSet(null, d)) {
-                    d.dispose();
+                    Disposable d = scheduler.schedulePeriodicallyDirect(this, timespan, timespan, unit);
+                    if (!timer.compareAndSet(null, d)) {
+                        d.dispose();
+                    }
                 }
             }
         }
@@ -145,10 +136,9 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
         public void onNext(T t) {
             synchronized (this) {
                 U b = buffer;
-                if (b == null) {
-                    return;
+                if (b != null) {
+                    b.add(t);
                 }
-                b.add(t);
             }
         }
 
@@ -158,7 +148,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             synchronized (this) {
                 buffer = null;
             }
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -175,7 +165,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             queue.offer(b);
             done = true;
             if (enter()) {
-                QueueDrainHelper.drainMaxLoop(queue, actual, false, this, this);
+                QueueDrainHelper.drainMaxLoop(queue, downstream, false, null, this);
             }
         }
 
@@ -186,39 +176,21 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void cancel() {
+            cancelled = true;
+            upstream.cancel();
             DisposableHelper.dispose(timer);
-
-            s.cancel();
         }
 
         @Override
         public void run() {
-            /*
-             * If running on a synchronous scheduler, the timer might never
-             * be set so the periodic timer can't be stopped this loop-back way.
-             * The last resort is to crash the task so it hopefully won't
-             * be rescheduled.
-             */
-            if (selfCancel) {
-                throw new CancellationException();
-            }
-
             U next;
 
             try {
-                next = bufferSupplier.call();
+                next = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                selfCancel = true;
                 cancel();
-                actual.onError(e);
-                return;
-            }
-
-            if (next == null) {
-                selfCancel = true;
-                cancel();
-                actual.onError(new NullPointerException("buffer supplied is null"));
+                downstream.onError(e);
                 return;
             }
 
@@ -226,15 +198,10 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
             synchronized (this) {
                 current = buffer;
-                if (current != null) {
-                    buffer = next;
+                if (current == null) {
+                    return;
                 }
-            }
-
-            if (current == null) {
-                selfCancel = true;
-                DisposableHelper.dispose(timer);
-                return;
+                buffer = next;
             }
 
             fastPathEmitMax(current, false, this);
@@ -242,13 +209,12 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public boolean accept(Subscriber<? super U> a, U v) {
-            actual.onNext(v);
+            downstream.onNext(v);
             return true;
         }
 
         @Override
         public void dispose() {
-            selfCancel = true;
             cancel();
         }
 
@@ -267,8 +233,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
         final Worker w;
         final List<U> buffers;
 
-        Subscription s;
-
+        Subscription upstream;
 
         BufferSkipBoundedSubscriber(Subscriber<? super U> actual,
                 Callable<U> bufferSupplier, long timespan,
@@ -284,48 +249,32 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (!SubscriptionHelper.validate(this.s, s)) {
+            if (!SubscriptionHelper.validate(this.upstream, s)) {
                 return;
             }
-            this.s = s;
+            this.upstream = s;
 
             final U b; // NOPMD
 
             try {
-                b = bufferSupplier.call();
+                b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 w.dispose();
                 s.cancel();
-                EmptySubscription.error(e, actual);
-                return;
-            }
-
-            if (b == null) {
-                w.dispose();
-                s.cancel();
-                EmptySubscription.error(new NullPointerException("The supplied buffer is null"), actual);
+                EmptySubscription.error(e, downstream);
                 return;
             }
 
             buffers.add(b);
 
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
 
             s.request(Long.MAX_VALUE);
 
             w.schedulePeriodically(this, timeskip, timeskip, unit);
 
-            w.schedule(new Runnable() {
-                @Override
-                public void run() {
-                    synchronized (BufferSkipBoundedSubscriber.this) {
-                        buffers.remove(b);
-                    }
-
-                    fastPathOrderedEmitMax(b, false, w);
-                }
-            }, timespan, unit);
+            w.schedule(new RemoveFromBuffer(b), timespan, unit);
         }
 
         @Override
@@ -342,7 +291,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             done = true;
             w.dispose();
             clear();
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -358,7 +307,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             }
             done = true;
             if (enter()) {
-                QueueDrainHelper.drainMaxLoop(queue, actual, false, w, this);
+                QueueDrainHelper.drainMaxLoop(queue, downstream, false, w, this);
             }
         }
 
@@ -369,9 +318,10 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void cancel() {
+            cancelled = true;
+            upstream.cancel();
             w.dispose();
             clear();
-            s.cancel();
         }
 
         void clear() {
@@ -388,19 +338,14 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             final U b; // NOPMD
 
             try {
-                b = bufferSupplier.call();
+                b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancel();
-                actual.onError(e);
+                downstream.onError(e);
                 return;
             }
 
-            if (b == null) {
-                cancel();
-                actual.onError(new NullPointerException("The supplied buffer is null"));
-                return;
-            }
             synchronized (this) {
                 if (cancelled) {
                     return;
@@ -408,22 +353,30 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
                 buffers.add(b);
             }
 
-            w.schedule(new Runnable() {
-                @Override
-                public void run() {
-                    synchronized (BufferSkipBoundedSubscriber.this) {
-                        buffers.remove(b);
-                    }
-
-                    fastPathOrderedEmitMax(b, false, w);
-                }
-            }, timespan, unit);
+            w.schedule(new RemoveFromBuffer(b), timespan, unit);
         }
 
         @Override
         public boolean accept(Subscriber<? super U> a, U v) {
             a.onNext(v);
             return true;
+        }
+
+        final class RemoveFromBuffer implements Runnable {
+            private final U buffer;
+
+            RemoveFromBuffer(U buffer) {
+                this.buffer = buffer;
+            }
+
+            @Override
+            public void run() {
+                synchronized (BufferSkipBoundedSubscriber.this) {
+                    buffers.remove(buffer);
+                }
+
+                fastPathOrderedEmitMax(buffer, false, w);
+            }
         }
     }
 
@@ -440,7 +393,7 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         Disposable timer;
 
-        Subscription s;
+        Subscription upstream;
 
         long producerIndex;
 
@@ -462,37 +415,30 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (!SubscriptionHelper.validate(this.s, s)) {
+            if (!SubscriptionHelper.validate(this.upstream, s)) {
                 return;
             }
-            this.s = s;
+            this.upstream = s;
 
             U b;
 
             try {
-                b = bufferSupplier.call();
+                b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 w.dispose();
                 s.cancel();
-                EmptySubscription.error(e, actual);
-                return;
-            }
-
-            if (b == null) {
-                w.dispose();
-                s.cancel();
-                EmptySubscription.error(new NullPointerException("The supplied buffer is null"), actual);
+                EmptySubscription.error(e, downstream);
                 return;
             }
 
             buffer = b;
 
-            actual.onSubscribe(this);
-
-            s.request(Long.MAX_VALUE);
+            downstream.onSubscribe(this);
 
             timer = w.schedulePeriodically(this, timespan, timespan, unit);
+
+            s.request(Long.MAX_VALUE);
         }
 
         @Override
@@ -509,61 +455,46 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
                 if (b.size() < maxSize) {
                     return;
                 }
+
+                buffer = null;
+                producerIndex++;
             }
 
             if (restartTimerOnMaxSize) {
-                buffer = null;
-                producerIndex++;
-
                 timer.dispose();
             }
 
             fastPathOrderedEmitMax(b, false, this);
 
             try {
-                b = bufferSupplier.call();
+                b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancel();
-                actual.onError(e);
+                downstream.onError(e);
                 return;
             }
 
-            if (b == null) {
-                cancel();
-                actual.onError(new NullPointerException("The buffer supplied is null"));
-                return;
+            synchronized (this) {
+                buffer = b;
+                consumerIndex++;
             }
-
-
-
             if (restartTimerOnMaxSize) {
-                synchronized (this) {
-                    buffer = b;
-                    consumerIndex++;
-                }
-
                 timer = w.schedulePeriodically(this, timespan, timespan, unit);
-            } else {
-                synchronized (this) {
-                    buffer = b;
-                }
             }
         }
 
         @Override
         public void onError(Throwable t) {
-            w.dispose();
             synchronized (this) {
                 buffer = null;
             }
-            actual.onError(t);
+            downstream.onError(t);
+            w.dispose();
         }
 
         @Override
         public void onComplete() {
-            w.dispose();
-
             U b;
             synchronized (this) {
                 b = buffer;
@@ -573,8 +504,10 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             queue.offer(b);
             done = true;
             if (enter()) {
-                QueueDrainHelper.drainMaxLoop(queue, actual, false, this, this);
+                QueueDrainHelper.drainMaxLoop(queue, downstream, false, this, this);
             }
+
+            w.dispose();
         }
 
         @Override
@@ -582,7 +515,6 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             a.onNext(v);
             return true;
         }
-
 
         @Override
         public void request(long n) {
@@ -599,11 +531,11 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
 
         @Override
         public void dispose() {
-            w.dispose();
             synchronized (this) {
                 buffer = null;
             }
-            s.cancel();
+            upstream.cancel();
+            w.dispose();
         }
 
         @Override
@@ -616,17 +548,11 @@ public final class FlowableBufferTimed<T, U extends Collection<? super T>> exten
             U next;
 
             try {
-                next = bufferSupplier.call();
+                next = ObjectHelper.requireNonNull(bufferSupplier.call(), "The supplied buffer is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancel();
-                actual.onError(e);
-                return;
-            }
-
-            if (next == null) {
-                cancel();
-                actual.onError(new NullPointerException("The buffer supplied is null"));
+                downstream.onError(e);
                 return;
             }
 

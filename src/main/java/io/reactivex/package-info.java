@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 /**
- * Base reactive classes: Flowable, Observable, Single and Completable; base reactive consumers;
+ * Base reactive classes: {@link io.reactivex.Flowable},  {@link io.reactivex.Observable},
+ * {@link io.reactivex.Single},  {@link io.reactivex.Maybe} and
+ *  {@link io.reactivex.Completable}; base reactive consumers;
  * other common base interfaces.
  *
  * <p>A library that enables subscribing to and composing asynchronous events and
@@ -38,15 +40,14 @@
  * <li>Observable == Observable (factory methods)</li>
  * <li>Flowable == IAsyncEnumerable (backpressure)</li>
  * <li>Subscriber == IAsyncEnumerator</li>
- * <li>
  * </ul>
  * The Single and Completable reactive base types have no equivalent in Rx.NET as of 3.x.
- * </p>
+ *
  * <p>Services which intend on exposing data asynchronously and wish
  * to allow reactive processing and composition can implement the
- * {@link io.reactivex.Flowable}, {@link io.reactivex.Observable}, {@link io.reactivex.Single}
- * or {@link io.reactivex.Completable} class which then allow consumers to subscribe to them
- * and receive events.</p>
+ * {@link io.reactivex.Flowable}, {@link io.reactivex.Observable}, {@link io.reactivex.Single},
+ * {@link io.reactivex.Maybe} or {@link io.reactivex.Completable} class which then allow
+ * consumers to subscribe to them and receive events.</p>
  * <p>Usage examples can be found on the {@link io.reactivex.Flowable}/{@link io.reactivex.Observable} and {@link org.reactivestreams.Subscriber} classes.</p>
  */
 package io.reactivex;

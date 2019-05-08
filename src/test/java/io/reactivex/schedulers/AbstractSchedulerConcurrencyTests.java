@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -36,6 +36,7 @@ import io.reactivex.subscribers.*;
 public abstract class AbstractSchedulerConcurrencyTests extends AbstractSchedulerTests {
 
     /**
+     * Make sure canceling through {@code subscribeOn} works.
      * Bug report: https://github.com/ReactiveX/RxJava/issues/431
      * @throws InterruptedException if the test is interrupted
      */
@@ -290,11 +291,11 @@ public abstract class AbstractSchedulerConcurrencyTests extends AbstractSchedule
         try {
             Flowable<Integer> obs = Flowable.unsafeCreate(new Publisher<Integer>() {
                 @Override
-                public void subscribe(final Subscriber<? super Integer> observer) {
+                public void subscribe(final Subscriber<? super Integer> subscriber) {
                     inner.schedule(new Runnable() {
                         @Override
                         public void run() {
-                            observer.onNext(42);
+                            subscriber.onNext(42);
                             latch.countDown();
 
                             // this will recursively schedule this task for execution again
@@ -302,12 +303,12 @@ public abstract class AbstractSchedulerConcurrencyTests extends AbstractSchedule
                         }
                     });
 
-                    observer.onSubscribe(new Subscription() {
+                    subscriber.onSubscribe(new Subscription() {
 
                         @Override
                         public void cancel() {
                             inner.dispose();
-                            observer.onComplete();
+                            subscriber.onComplete();
                             completionLatch.countDown();
                         }
 
@@ -368,9 +369,9 @@ public abstract class AbstractSchedulerConcurrencyTests extends AbstractSchedule
 
         final AtomicInteger count = new AtomicInteger();
 
-        Flowable<Integer> o1 = Flowable.<Integer> just(1, 2, 3, 4, 5);
+        Flowable<Integer> f1 = Flowable.<Integer> just(1, 2, 3, 4, 5);
 
-        o1.subscribe(new Consumer<Integer>() {
+        f1.subscribe(new Consumer<Integer>() {
 
             @Override
             public void accept(Integer t) {
@@ -393,7 +394,7 @@ public abstract class AbstractSchedulerConcurrencyTests extends AbstractSchedule
         final CountDownLatch latch = new CountDownLatch(5);
         final CountDownLatch first = new CountDownLatch(1);
 
-        o1.subscribeOn(scheduler).subscribe(new Consumer<Integer>() {
+        f1.subscribeOn(scheduler).subscribe(new Consumer<Integer>() {
 
             @Override
             public void accept(Integer t) {

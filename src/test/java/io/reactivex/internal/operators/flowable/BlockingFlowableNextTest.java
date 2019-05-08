@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -23,8 +23,11 @@ import org.junit.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.disposables.SerialDisposable;
 import io.reactivex.exceptions.TestException;
+import io.reactivex.internal.operators.flowable.BlockingFlowableNext.NextSubscriber;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.*;
 import io.reactivex.schedulers.Schedulers;
 
@@ -222,78 +225,92 @@ public class BlockingFlowableNextTest {
      * <p/>
      * This results in output such as => a: 1 b: 2 c: 89
      *
-     * @throws Throwable
+     * @throws Throwable some method call is declared throws
      */
     @Test
     public void testNoBufferingOrBlockingOfSequence() throws Throwable {
-        final CountDownLatch finished = new CountDownLatch(1);
-        final int COUNT = 30;
-        final CountDownLatch timeHasPassed = new CountDownLatch(COUNT);
-        final AtomicBoolean running = new AtomicBoolean(true);
-        final AtomicInteger count = new AtomicInteger(0);
-        final Flowable<Integer> obs = Flowable.unsafeCreate(new Publisher<Integer>() {
-
-            @Override
-            public void subscribe(final Subscriber<? super Integer> o) {
-                o.onSubscribe(new BooleanSubscription());
-                new Thread(new Runnable() {
+        int repeat = 0;
+        for (;;) {
+            final SerialDisposable task = new SerialDisposable();
+            try {
+                final CountDownLatch finished = new CountDownLatch(1);
+                final int COUNT = 30;
+                final CountDownLatch timeHasPassed = new CountDownLatch(COUNT);
+                final AtomicBoolean running = new AtomicBoolean(true);
+                final AtomicInteger count = new AtomicInteger(0);
+                final Flowable<Integer> obs = Flowable.unsafeCreate(new Publisher<Integer>() {
 
                     @Override
-                    public void run() {
-                        try {
-                            while (running.get()) {
-                                o.onNext(count.incrementAndGet());
-                                timeHasPassed.countDown();
+                    public void subscribe(final Subscriber<? super Integer> subscriber) {
+                        subscriber.onSubscribe(new BooleanSubscription());
+                        task.replace(Schedulers.single().scheduleDirect(new Runnable() {
+
+                            @Override
+                            public void run() {
+                                try {
+                                    while (running.get() && !task.isDisposed()) {
+                                        subscriber.onNext(count.incrementAndGet());
+                                        timeHasPassed.countDown();
+                                    }
+                                    subscriber.onComplete();
+                                } catch (Throwable e) {
+                                    subscriber.onError(e);
+                                } finally {
+                                    finished.countDown();
+                                }
                             }
-                            o.onComplete();
-                        } catch (Throwable e) {
-                            o.onError(e);
-                        } finally {
-                            finished.countDown();
-                        }
+                        }));
                     }
-                }).start();
+
+                });
+
+                Iterator<Integer> it = obs.blockingNext().iterator();
+
+                assertTrue(it.hasNext());
+                int a = it.next();
+                assertTrue(it.hasNext());
+                int b = it.next();
+                // we should have a different value
+                assertTrue("a and b should be different", a != b);
+
+                // wait for some time (if times out we are blocked somewhere so fail ... set very high for very slow, constrained machines)
+                timeHasPassed.await(8000, TimeUnit.MILLISECONDS);
+
+                assertTrue(it.hasNext());
+                int c = it.next();
+
+                assertTrue("c should not just be the next in sequence", c != (b + 1));
+                assertTrue("expected that c [" + c + "] is higher than or equal to " + COUNT, c >= COUNT);
+
+                assertTrue(it.hasNext());
+                int d = it.next();
+                assertTrue(d > c);
+
+                // shut down the thread
+                running.set(false);
+
+                finished.await();
+
+                assertFalse(it.hasNext());
+
+                System.out.println("a: " + a + " b: " + b + " c: " + c);
+                break;
+            } catch (AssertionError ex) {
+                if (++repeat == 3) {
+                    throw ex;
+                }
+                Thread.sleep((int)(1000 * Math.pow(2, repeat - 1)));
+            } finally {
+                task.dispose();
             }
-
-        });
-
-        Iterator<Integer> it = obs.blockingNext().iterator();
-
-        assertTrue(it.hasNext());
-        int a = it.next();
-        assertTrue(it.hasNext());
-        int b = it.next();
-        // we should have a different value
-        assertTrue("a and b should be different", a != b);
-
-        // wait for some time (if times out we are blocked somewhere so fail ... set very high for very slow, constrained machines)
-        timeHasPassed.await(8000, TimeUnit.MILLISECONDS);
-
-        assertTrue(it.hasNext());
-        int c = it.next();
-
-        assertTrue("c should not just be the next in sequence", c != (b + 1));
-        assertTrue("expected that c [" + c + "] is higher than or equal to " + COUNT, c >= COUNT);
-
-        assertTrue(it.hasNext());
-        int d = it.next();
-        assertTrue(d > c);
-
-        // shut down the thread
-        running.set(false);
-
-        finished.await();
-
-        assertFalse(it.hasNext());
-
-        System.out.println("a: " + a + " b: " + b + " c: " + c);
+        }
     }
 
     @Test /* (timeout = 8000) */
     public void testSingleSourceManyIterators() throws InterruptedException {
-        Flowable<Long> o = Flowable.interval(250, TimeUnit.MILLISECONDS);
+        Flowable<Long> f = Flowable.interval(250, TimeUnit.MILLISECONDS);
         PublishProcessor<Integer> terminal = PublishProcessor.create();
-        Flowable<Long> source = o.takeUntil(terminal);
+        Flowable<Long> source = f.takeUntil(terminal);
 
         Iterable<Long> iter = source.blockingNext();
 
@@ -319,6 +336,63 @@ public class BlockingFlowableNextTest {
     @Test
     public void constructorshouldbeprivate() {
         TestHelper.checkUtilityClass(BlockingFlowableNext.class);
+    }
+
+    @Test(expected = UnsupportedOperationException.class)
+    public void remove() {
+        Flowable.never().blockingNext().iterator().remove();
+    }
+
+    @Test
+    public void interrupt() {
+        Iterator<Object> it = Flowable.never().blockingNext().iterator();
+
+        try {
+            Thread.currentThread().interrupt();
+            it.next();
+        } catch (RuntimeException ex) {
+            assertTrue(ex.toString(), ex.getCause() instanceof InterruptedException);
+        }
+    }
+
+    @Test
+    public void nextObserverError() {
+        NextSubscriber<Integer> no = new NextSubscriber<Integer>();
+
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            no.onError(new TestException());
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void nextObserverOnNext() throws Exception {
+        NextSubscriber<Integer> no = new NextSubscriber<Integer>();
+
+        no.setWaiting();
+        no.onNext(Notification.createOnNext(1));
+
+        no.setWaiting();
+        no.onNext(Notification.createOnNext(1));
+
+        assertEquals(1, no.takeNext().getValue().intValue());
+    }
+
+    @Test
+    public void nextObserverOnCompleteOnNext() throws Exception {
+        NextSubscriber<Integer> no = new NextSubscriber<Integer>();
+
+        no.setWaiting();
+        no.onNext(Notification.<Integer>createOnComplete());
+
+        no.setWaiting();
+        no.onNext(Notification.createOnNext(1));
+
+        assertTrue(no.takeNext().isOnComplete());
     }
 
 }

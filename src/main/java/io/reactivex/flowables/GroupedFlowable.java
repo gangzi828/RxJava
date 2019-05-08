@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,13 +13,14 @@
 package io.reactivex.flowables;
 
 import io.reactivex.Flowable;
+import io.reactivex.annotations.Nullable;
 
 /**
  * A {@link Flowable} that has been grouped by key, the value of which can be obtained with {@link #getKey()}.
  * <p>
  * <em>Note:</em> A {@link GroupedFlowable} will cache the items it is to emit until such time as it
  * is subscribed to. For this reason, in order to avoid memory leaks, you should not simply ignore those
- * {@code GroupedObservable}s that do not concern you. Instead, you can signal to them that they
+ * {@code GroupedFlowable}s that do not concern you. Instead, you can signal to them that they
  * may discard their buffers by applying an operator like {@link Flowable#take take}{@code (0)} to them.
  *
  * @param <K>
@@ -37,15 +38,16 @@ public abstract class GroupedFlowable<K, T> extends Flowable<T> {
      * Constructs a GroupedFlowable with the given key.
      * @param key the key
      */
-    protected GroupedFlowable(K key) {
+    protected GroupedFlowable(@Nullable K key) {
         this.key = key;
     }
 
     /**
-     * Returns the key that identifies the group of items emitted by this {@code GroupedObservable}.
+     * Returns the key that identifies the group of items emitted by this {@code GroupedFlowable}.
      *
-     * @return the key that the items emitted by this {@code GroupedObservable} were grouped by
+     * @return the key that the items emitted by this {@code GroupedFlowable} were grouped by
      */
+    @Nullable
     public K getKey() {
         return key;
     }

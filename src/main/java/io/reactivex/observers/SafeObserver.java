@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 package io.reactivex.observers;
 
 import io.reactivex.Observer;
+import io.reactivex.annotations.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.*;
 import io.reactivex.internal.disposables.*;
@@ -26,32 +27,32 @@ import io.reactivex.plugins.RxJavaPlugins;
  */
 public final class SafeObserver<T> implements Observer<T>, Disposable {
     /** The actual Subscriber. */
-    final Observer<? super T> actual;
+    final Observer<? super T> downstream;
     /** The subscription. */
-    Disposable s;
+    Disposable upstream;
     /** Indicates a terminal state. */
     boolean done;
 
     /**
      * Constructs a SafeObserver by wrapping the given actual Observer.
-     * @param actual the actual Observer to wrap, not null (not validated)
+     * @param downstream the actual Observer to wrap, not null (not validated)
      */
-    public SafeObserver(Observer<? super T> actual) {
-        this.actual = actual;
+    public SafeObserver(@NonNull Observer<? super T> downstream) {
+        this.downstream = downstream;
     }
 
     @Override
-    public void onSubscribe(Disposable s) {
-        if (DisposableHelper.validate(this.s, s)) {
-            this.s = s;
+    public void onSubscribe(@NonNull Disposable d) {
+        if (DisposableHelper.validate(this.upstream, d)) {
+            this.upstream = d;
             try {
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 done = true;
                 // can't call onError because the actual's state may be corrupt at this point
                 try {
-                    s.dispose();
+                    d.dispose();
                 } catch (Throwable e1) {
                     Exceptions.throwIfFatal(e1);
                     RxJavaPlugins.onError(new CompositeException(e, e1));
@@ -62,23 +63,22 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         }
     }
 
-
     @Override
     public void dispose() {
-        s.dispose();
+        upstream.dispose();
     }
 
     @Override
     public boolean isDisposed() {
-        return s.isDisposed();
+        return upstream.isDisposed();
     }
 
     @Override
-    public void onNext(T t) {
+    public void onNext(@NonNull T t) {
         if (done) {
             return;
         }
-        if (s == null) {
+        if (upstream == null) {
             onNextNoSubscription();
             return;
         }
@@ -86,7 +86,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         if (t == null) {
             Throwable ex = new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources.");
             try {
-                s.dispose();
+                upstream.dispose();
             } catch (Throwable e1) {
                 Exceptions.throwIfFatal(e1);
                 onError(new CompositeException(ex, e1));
@@ -97,11 +97,11 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         }
 
         try {
-            actual.onNext(t);
+            downstream.onNext(t);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             try {
-                s.dispose();
+                upstream.dispose();
             } catch (Throwable e1) {
                 Exceptions.throwIfFatal(e1);
                 onError(new CompositeException(e, e1));
@@ -117,7 +117,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         Throwable ex = new NullPointerException("Subscription not set!");
 
         try {
-            actual.onSubscribe(EmptyDisposable.INSTANCE);
+            downstream.onSubscribe(EmptyDisposable.INSTANCE);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // can't call onError because the actual's state may be corrupt at this point
@@ -125,7 +125,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
             return;
         }
         try {
-            actual.onError(ex);
+            downstream.onError(ex);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // if onError failed, all that's left is to report the error to plugins
@@ -134,18 +134,18 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
     }
 
     @Override
-    public void onError(Throwable t) {
+    public void onError(@NonNull Throwable t) {
         if (done) {
             RxJavaPlugins.onError(t);
             return;
         }
         done = true;
 
-        if (s == null) {
+        if (upstream == null) {
             Throwable npe = new NullPointerException("Subscription not set!");
 
             try {
-                actual.onSubscribe(EmptyDisposable.INSTANCE);
+                downstream.onSubscribe(EmptyDisposable.INSTANCE);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 // can't call onError because the actual's state may be corrupt at this point
@@ -153,7 +153,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
                 return;
             }
             try {
-                actual.onError(new CompositeException(t, npe));
+                downstream.onError(new CompositeException(t, npe));
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 // if onError failed, all that's left is to report the error to plugins
@@ -167,7 +167,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         }
 
         try {
-            actual.onError(t);
+            downstream.onError(t);
         } catch (Throwable ex) {
             Exceptions.throwIfFatal(ex);
 
@@ -183,13 +183,13 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
 
         done = true;
 
-        if (s == null) {
+        if (upstream == null) {
             onCompleteNoSubscription();
             return;
         }
 
         try {
-            actual.onComplete();
+            downstream.onComplete();
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             RxJavaPlugins.onError(e);
@@ -201,7 +201,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
         Throwable ex = new NullPointerException("Subscription not set!");
 
         try {
-            actual.onSubscribe(EmptyDisposable.INSTANCE);
+            downstream.onSubscribe(EmptyDisposable.INSTANCE);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // can't call onError because the actual's state may be corrupt at this point
@@ -209,7 +209,7 @@ public final class SafeObserver<T> implements Observer<T>, Disposable {
             return;
         }
         try {
-            actual.onError(ex);
+            downstream.onError(ex);
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
             // if onError failed, all that's left is to report the error to plugins

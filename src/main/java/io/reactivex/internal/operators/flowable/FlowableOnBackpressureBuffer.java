@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,13 +13,15 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.Action;
-import io.reactivex.internal.fuseable.SimpleQueue;
+import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.*;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.internal.util.BackpressureHelper;
@@ -30,7 +32,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
     final boolean delayError;
     final Action onOverflow;
 
-    public FlowableOnBackpressureBuffer(Publisher<T> source, int bufferSize, boolean unbounded,
+    public FlowableOnBackpressureBuffer(Flowable<T> source, int bufferSize, boolean unbounded,
             boolean delayError, Action onOverflow) {
         super(source);
         this.bufferSize = bufferSize;
@@ -44,16 +46,16 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
         source.subscribe(new BackpressureBufferSubscriber<T>(s, bufferSize, unbounded, delayError, onOverflow));
     }
 
-    static final class BackpressureBufferSubscriber<T> extends BasicIntQueueSubscription<T> implements Subscriber<T> {
+    static final class BackpressureBufferSubscriber<T> extends BasicIntQueueSubscription<T> implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -2514538129242366402L;
 
-        final Subscriber<? super T> actual;
-        final SimpleQueue<T> queue;
+        final Subscriber<? super T> downstream;
+        final SimplePlainQueue<T> queue;
         final boolean delayError;
         final Action onOverflow;
 
-        Subscription s;
+        Subscription upstream;
 
         volatile boolean cancelled;
 
@@ -66,11 +68,11 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
 
         BackpressureBufferSubscriber(Subscriber<? super T> actual, int bufferSize,
                 boolean unbounded, boolean delayError, Action onOverflow) {
-            this.actual = actual;
+            this.downstream = actual;
             this.onOverflow = onOverflow;
             this.delayError = delayError;
 
-            SimpleQueue<T> q;
+            SimplePlainQueue<T> q;
 
             if (unbounded) {
                 q = new SpscLinkedArrayQueue<T>(bufferSize);
@@ -83,9 +85,9 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
                 s.request(Long.MAX_VALUE);
             }
         }
@@ -93,7 +95,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
         @Override
         public void onNext(T t) {
             if (!queue.offer(t)) {
-                s.cancel();
+                upstream.cancel();
                 MissingBackpressureException ex = new MissingBackpressureException("Buffer is full");
                 try {
                     onOverflow.run();
@@ -105,7 +107,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
                 return;
             }
             if (outputFused) {
-                actual.onNext(null);
+                downstream.onNext(null);
             } else {
                 drain();
             }
@@ -116,7 +118,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
             error = t;
             done = true;
             if (outputFused) {
-                actual.onError(t);
+                downstream.onError(t);
             } else {
                 drain();
             }
@@ -126,7 +128,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
         public void onComplete() {
             done = true;
             if (outputFused) {
-                actual.onComplete();
+                downstream.onComplete();
             } else {
                 drain();
             }
@@ -146,7 +148,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
         public void cancel() {
             if (!cancelled) {
                 cancelled = true;
-                s.cancel();
+                upstream.cancel();
 
                 if (getAndIncrement() == 0) {
                     queue.clear();
@@ -157,8 +159,8 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
         void drain() {
             if (getAndIncrement() == 0) {
                 int missed = 1;
-                final SimpleQueue<T> q = queue;
-                final Subscriber<? super T> a = actual;
+                final SimplePlainQueue<T> q = queue;
+                final Subscriber<? super T> a = downstream;
                 for (;;) {
 
                     if (checkTerminated(done, q.isEmpty(), a)) {
@@ -171,16 +173,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
 
                     while (e != r) {
                         boolean d = done;
-                        T v;
-
-                        try {
-                            v = q.poll();
-                        } catch (Throwable ex) {
-                            Exceptions.throwIfFatal(ex);
-                            s.cancel();
-                            a.onError(ex);
-                            return;
-                        }
+                        T v = q.poll();
                         boolean empty = v == null;
 
                         if (checkTerminated(d, empty, a)) {
@@ -260,6 +253,7 @@ public final class FlowableOnBackpressureBuffer<T> extends AbstractFlowableWithU
             return NONE;
         }
 
+        @Nullable
         @Override
         public T poll() throws Exception {
             return queue.poll();

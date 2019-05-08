@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.*;
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Function;
 import io.reactivex.subscribers.TestSubscriber;
-
 
 public class FlowableDetachTest {
 
@@ -85,7 +85,6 @@ public class FlowableDetachTest {
         ts.assertNoErrors();
         ts.assertComplete();
     }
-
 
     @Test
     public void backpressured() throws Exception {
@@ -157,5 +156,20 @@ public class FlowableDetachTest {
         ts.assertValues(1, 2, 3);
         ts.assertComplete();
         ts.assertNoErrors();
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Flowable.never().onTerminateDetach());
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeFlowable(new Function<Flowable<Object>, Flowable<Object>>() {
+            @Override
+            public Flowable<Object> apply(Flowable<Object> f) throws Exception {
+                return f.onTerminateDetach();
+            }
+        });
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,15 +22,16 @@ import io.reactivex.disposables.Disposable;
  * the other methods are not implemented.
  */
 final class DisposeOnCancel implements Future<Object> {
-    final Disposable d;
+
+    final Disposable upstream;
 
     DisposeOnCancel(Disposable d) {
-        this.d = d;
+        this.upstream = d;
     }
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
-        d.dispose();
+        upstream.dispose();
         return false;
     }
 

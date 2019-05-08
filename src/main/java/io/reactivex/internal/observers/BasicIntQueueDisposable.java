@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -25,7 +25,6 @@ import io.reactivex.internal.fuseable.QueueDisposable;
 public abstract class BasicIntQueueDisposable<T>
 extends AtomicInteger
 implements QueueDisposable<T> {
-
 
     private static final long serialVersionUID = -1001730202384742097L;
 

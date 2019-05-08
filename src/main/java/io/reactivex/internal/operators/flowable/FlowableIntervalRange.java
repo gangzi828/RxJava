@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,8 +19,11 @@ import java.util.concurrent.atomic.*;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
+import io.reactivex.Scheduler.Worker;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.*;
+import io.reactivex.exceptions.MissingBackpressureException;
+import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.schedulers.TrampolineScheduler;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.BackpressureHelper;
 
@@ -46,9 +49,16 @@ public final class FlowableIntervalRange extends Flowable<Long> {
         IntervalRangeSubscriber is = new IntervalRangeSubscriber(s, start, end);
         s.onSubscribe(is);
 
-        Disposable d = scheduler.schedulePeriodicallyDirect(is, initialDelay, period, unit);
+        Scheduler sch = scheduler;
 
-        is.setResource(d);
+        if (sch instanceof TrampolineScheduler) {
+            Worker worker = sch.createWorker();
+            is.setResource(worker);
+            worker.schedulePeriodically(is, initialDelay, period, unit);
+        } else {
+            Disposable d = sch.schedulePeriodicallyDirect(is, initialDelay, period, unit);
+            is.setResource(d);
+        }
     }
 
     static final class IntervalRangeSubscriber extends AtomicLong
@@ -56,7 +66,7 @@ public final class FlowableIntervalRange extends Flowable<Long> {
 
         private static final long serialVersionUID = -2809475196591179431L;
 
-        final Subscriber<? super Long> actual;
+        final Subscriber<? super Long> downstream;
         final long end;
 
         long count;
@@ -64,7 +74,7 @@ public final class FlowableIntervalRange extends Flowable<Long> {
         final AtomicReference<Disposable> resource = new AtomicReference<Disposable>();
 
         IntervalRangeSubscriber(Subscriber<? super Long> actual, long start, long end) {
-            this.actual = actual;
+            this.downstream = actual;
             this.count = start;
             this.end = end;
         }
@@ -88,14 +98,13 @@ public final class FlowableIntervalRange extends Flowable<Long> {
 
                 if (r != 0L) {
                     long c = count;
-                    actual.onNext(c);
+                    downstream.onNext(c);
 
                     if (c == end) {
-                        try {
-                            actual.onComplete();
-                        } finally {
-                            DisposableHelper.dispose(resource);
+                        if (resource.get() != DisposableHelper.DISPOSED) {
+                            downstream.onComplete();
                         }
+                        DisposableHelper.dispose(resource);
                         return;
                     }
 
@@ -105,11 +114,8 @@ public final class FlowableIntervalRange extends Flowable<Long> {
                         decrementAndGet();
                     }
                 } else {
-                    try {
-                        actual.onError(new IllegalStateException("Can't deliver value " + count + " due to lack of requests"));
-                    } finally {
-                        DisposableHelper.dispose(resource);
-                    }
+                    downstream.onError(new MissingBackpressureException("Can't deliver value " + count + " due to lack of requests"));
+                    DisposableHelper.dispose(resource);
                 }
             }
         }

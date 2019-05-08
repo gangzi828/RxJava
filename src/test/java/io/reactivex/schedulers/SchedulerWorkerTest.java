@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import static org.junit.Assert.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.annotations.NonNull;
 import org.junit.Test;
 
 import io.reactivex.Scheduler;
@@ -27,6 +28,7 @@ public class SchedulerWorkerTest {
 
     static final class CustomDriftScheduler extends Scheduler {
         public volatile long drift;
+        @NonNull
         @Override
         public Worker createWorker() {
             final Worker w = Schedulers.computation().createWorker();
@@ -42,13 +44,15 @@ public class SchedulerWorkerTest {
                     return w.isDisposed();
                 }
 
+                @NonNull
                 @Override
-                public Disposable schedule(Runnable action) {
+                public Disposable schedule(@NonNull Runnable action) {
                     return w.schedule(action);
                 }
 
+                @NonNull
                 @Override
-                public Disposable schedule(Runnable action, long delayTime, TimeUnit unit) {
+                public Disposable schedule(@NonNull Runnable action, long delayTime, @NonNull TimeUnit unit) {
                     return w.schedule(action, delayTime, unit);
                 }
 
@@ -60,7 +64,7 @@ public class SchedulerWorkerTest {
         }
 
         @Override
-        public long now(TimeUnit unit) {
+        public long now(@NonNull TimeUnit unit) {
             return super.now(unit) + unit.convert(drift, TimeUnit.NANOSECONDS);
         }
     }

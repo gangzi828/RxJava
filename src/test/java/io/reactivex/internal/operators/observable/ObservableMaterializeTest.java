@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -24,7 +24,7 @@ import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposables;
-import io.reactivex.functions.Consumer;
+import io.reactivex.functions.*;
 import io.reactivex.observers.*;
 
 public class ObservableMaterializeTest {
@@ -101,17 +101,17 @@ public class ObservableMaterializeTest {
 
     @Test
     public void testWithCompletionCausingError() {
-        TestObserver<Notification<Integer>> ts = new TestObserver<Notification<Integer>>();
+        TestObserver<Notification<Integer>> to = new TestObserver<Notification<Integer>>();
         final RuntimeException ex = new RuntimeException("boo");
         Observable.<Integer>empty().materialize().doOnNext(new Consumer<Object>() {
             @Override
             public void accept(Object t) {
                 throw ex;
             }
-        }).subscribe(ts);
-        ts.assertError(ex);
-        ts.assertNoValues();
-        ts.assertTerminated();
+        }).subscribe(to);
+        to.assertError(ex);
+        to.assertNoValues();
+        to.assertTerminated();
     }
 
     private static class TestLocalObserver extends DefaultObserver<Notification<String>> {
@@ -175,5 +175,20 @@ public class ObservableMaterializeTest {
             });
             t.start();
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).materialize());
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, ObservableSource<Notification<Object>>>() {
+            @Override
+            public ObservableSource<Notification<Object>> apply(Observable<Object> o) throws Exception {
+                return o.materialize();
+            }
+        });
     }
 }

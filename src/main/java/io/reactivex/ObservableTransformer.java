@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,8 @@
 
 package io.reactivex;
 
+import io.reactivex.annotations.*;
+
 /**
  * Interface to compose Observables.
  *
@@ -25,8 +27,7 @@ public interface ObservableTransformer<Upstream, Downstream> {
      * optionally different element type.
      * @param upstream the upstream Observable instance
      * @return the transformed ObservableSource instance
-     * @throws Exception in case the transformation throws, checked exceptions will be wrapped
-     * into a RuntimeException
      */
-    ObservableSource<Downstream> apply(Observable<Upstream> upstream) throws Exception;
+    @NonNull
+    ObservableSource<Downstream> apply(@NonNull Observable<Upstream> upstream);
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,8 +18,10 @@ import java.util.concurrent.Callable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 import io.reactivex.internal.subscribers.QueueDrainSubscriber;
 import io.reactivex.internal.subscriptions.*;
@@ -31,7 +33,7 @@ extends AbstractFlowableWithUpstream<T, U> {
     final Publisher<B> boundary;
     final Callable<U> bufferSupplier;
 
-    public FlowableBufferExactBoundary(Publisher<T> source, Publisher<B> boundary, Callable<U> bufferSupplier) {
+    public FlowableBufferExactBoundary(Flowable<T> source, Publisher<B> boundary, Callable<U> bufferSupplier) {
         super(source);
         this.boundary = boundary;
         this.bufferSupplier = bufferSupplier;
@@ -43,12 +45,12 @@ extends AbstractFlowableWithUpstream<T, U> {
     }
 
     static final class BufferExactBoundarySubscriber<T, U extends Collection<? super T>, B>
-    extends QueueDrainSubscriber<T, U, U> implements Subscriber<T>, Subscription, Disposable {
+    extends QueueDrainSubscriber<T, U, U> implements FlowableSubscriber<T>, Subscription, Disposable {
 
         final Callable<U> bufferSupplier;
         final Publisher<B> boundary;
 
-        Subscription s;
+        Subscription upstream;
 
         Disposable other;
 
@@ -63,35 +65,29 @@ extends AbstractFlowableWithUpstream<T, U> {
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (!SubscriptionHelper.validate(this.s, s)) {
+            if (!SubscriptionHelper.validate(this.upstream, s)) {
                 return;
             }
-            this.s = s;
+            this.upstream = s;
 
             U b;
 
             try {
-                b = bufferSupplier.call();
+                b = ObjectHelper.requireNonNull(bufferSupplier.call(), "The buffer supplied is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancelled = true;
                 s.cancel();
-                EmptySubscription.error(e, actual);
+                EmptySubscription.error(e, downstream);
                 return;
             }
 
-            if (b == null) {
-                cancelled = true;
-                s.cancel();
-                EmptySubscription.error(new NullPointerException("The buffer supplied is null"), actual);
-                return;
-            }
             buffer = b;
 
             BufferBoundarySubscriber<T, U, B> bs = new BufferBoundarySubscriber<T, U, B>(this);
             other = bs;
 
-            actual.onSubscribe(this);
+            downstream.onSubscribe(this);
 
             if (!cancelled) {
                 s.request(Long.MAX_VALUE);
@@ -114,7 +110,7 @@ extends AbstractFlowableWithUpstream<T, U> {
         @Override
         public void onError(Throwable t) {
             cancel();
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -130,7 +126,7 @@ extends AbstractFlowableWithUpstream<T, U> {
             queue.offer(b);
             done = true;
             if (enter()) {
-                QueueDrainHelper.drainMaxLoop(queue, actual, false, this, this);
+                QueueDrainHelper.drainMaxLoop(queue, downstream, false, this, this);
             }
         }
 
@@ -144,7 +140,7 @@ extends AbstractFlowableWithUpstream<T, U> {
             if (!cancelled) {
                 cancelled = true;
                 other.dispose();
-                s.cancel();
+                upstream.cancel();
 
                 if (enter()) {
                     queue.clear();
@@ -157,17 +153,11 @@ extends AbstractFlowableWithUpstream<T, U> {
             U next;
 
             try {
-                next = bufferSupplier.call();
+                next = ObjectHelper.requireNonNull(bufferSupplier.call(), "The buffer supplied is null");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 cancel();
-                actual.onError(e);
-                return;
-            }
-
-            if (next == null) {
-                cancel();
-                actual.onError(new NullPointerException("The buffer supplied is null"));
+                downstream.onError(e);
                 return;
             }
 
@@ -195,7 +185,7 @@ extends AbstractFlowableWithUpstream<T, U> {
 
         @Override
         public boolean accept(Subscriber<? super U> a, U v) {
-            actual.onNext(v);
+            downstream.onNext(v);
             return true;
         }
 

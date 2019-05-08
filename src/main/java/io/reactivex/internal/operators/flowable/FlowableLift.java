@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,9 +13,9 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import org.reactivestreams.*;
+import org.reactivestreams.Subscriber;
 
-import io.reactivex.FlowableOperator;
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -32,25 +32,14 @@ public final class FlowableLift<R, T> extends AbstractFlowableWithUpstream<T, R>
     /** The actual operator. */
     final FlowableOperator<? extends R, ? super T> operator;
 
-    public FlowableLift(Publisher<T> source, FlowableOperator<? extends R, ? super T> operator) {
+    public FlowableLift(Flowable<T> source, FlowableOperator<? extends R, ? super T> operator) {
         super(source);
         this.operator = operator;
-    }
-
-    /**
-     * Returns the operator of this lift publisher.
-     * @return the operator of this lift publisher
-     */
-    public FlowableOperator<? extends R, ? super T> operator() {
-        return operator;
     }
 
     @Override
     public void subscribeActual(Subscriber<? super R> s) {
         try {
-            if (s == null) {
-                throw new NullPointerException("Operator " + operator + " received a null Subscriber");
-            }
             Subscriber<? super T> st = operator.apply(s);
 
             if (st == null) {

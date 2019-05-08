@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -12,13 +12,14 @@
  */
 package io.reactivex.internal.schedulers;
 
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
-
 import io.reactivex.Scheduler;
+import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.*;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.plugins.RxJavaPlugins;
+
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A scheduler with a shared, single threaded underlying ScheduledExecutorService.
@@ -26,6 +27,7 @@ import io.reactivex.plugins.RxJavaPlugins;
  */
 public final class SingleScheduler extends Scheduler {
 
+    final ThreadFactory threadFactory;
     final AtomicReference<ScheduledExecutorService> executor = new AtomicReference<ScheduledExecutorService>();
 
     /** The name of the system property for setting the thread priority for this Scheduler. */
@@ -43,15 +45,26 @@ public final class SingleScheduler extends Scheduler {
         int priority = Math.max(Thread.MIN_PRIORITY, Math.min(Thread.MAX_PRIORITY,
                 Integer.getInteger(KEY_SINGLE_PRIORITY, Thread.NORM_PRIORITY)));
 
-        SINGLE_THREAD_FACTORY = new RxThreadFactory(THREAD_NAME_PREFIX, priority);
+        SINGLE_THREAD_FACTORY = new RxThreadFactory(THREAD_NAME_PREFIX, priority, true);
     }
 
     public SingleScheduler() {
-        executor.lazySet(createExecutor());
+        this(SINGLE_THREAD_FACTORY);
     }
 
-    static ScheduledExecutorService createExecutor() {
-        return SchedulerPoolFactory.create(SINGLE_THREAD_FACTORY);
+    /**
+     * Constructs a SingleScheduler with the given ThreadFactory and prepares the
+     * single scheduler thread.
+     * @param threadFactory thread factory to use for creating worker threads. Note that this takes precedence over any
+     *                      system properties for configuring new thread creation. Cannot be null.
+     */
+    public SingleScheduler(ThreadFactory threadFactory) {
+        this.threadFactory = threadFactory;
+        executor.lazySet(createExecutor(threadFactory));
+    }
+
+    static ScheduledExecutorService createExecutor(ThreadFactory threadFactory) {
+        return SchedulerPoolFactory.create(threadFactory);
     }
 
     @Override
@@ -66,7 +79,7 @@ public final class SingleScheduler extends Scheduler {
                 return;
             }
             if (next == null) {
-                next = createExecutor();
+                next = createExecutor(threadFactory);
             }
             if (executor.compareAndSet(current, next)) {
                 return;
@@ -86,34 +99,60 @@ public final class SingleScheduler extends Scheduler {
         }
     }
 
+    @NonNull
     @Override
     public Worker createWorker() {
         return new ScheduledWorker(executor.get());
     }
 
+    @NonNull
     @Override
-    public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit) {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+    public Disposable scheduleDirect(@NonNull Runnable run, long delay, TimeUnit unit) {
+        ScheduledDirectTask task = new ScheduledDirectTask(RxJavaPlugins.onSchedule(run));
         try {
             Future<?> f;
             if (delay <= 0L) {
-                f = executor.get().submit(decoratedRun);
+                f = executor.get().submit(task);
             } else {
-                f = executor.get().schedule(decoratedRun, delay, unit);
+                f = executor.get().schedule(task, delay, unit);
             }
-            return Disposables.fromFuture(f);
+            task.setFuture(f);
+            return task;
         } catch (RejectedExecutionException ex) {
             RxJavaPlugins.onError(ex);
             return EmptyDisposable.INSTANCE;
         }
     }
 
+    @NonNull
     @Override
-    public Disposable schedulePeriodicallyDirect(Runnable run, long initialDelay, long period, TimeUnit unit) {
-        Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+    public Disposable schedulePeriodicallyDirect(@NonNull Runnable run, long initialDelay, long period, TimeUnit unit) {
+        final Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+        if (period <= 0L) {
+
+            ScheduledExecutorService exec = executor.get();
+
+            InstantPeriodicTask periodicWrapper = new InstantPeriodicTask(decoratedRun, exec);
+            Future<?> f;
+            try {
+                if (initialDelay <= 0L) {
+                    f = exec.submit(periodicWrapper);
+                } else {
+                    f = exec.schedule(periodicWrapper, initialDelay, unit);
+                }
+                periodicWrapper.setFirst(f);
+            } catch (RejectedExecutionException ex) {
+                RxJavaPlugins.onError(ex);
+                return EmptyDisposable.INSTANCE;
+            }
+
+            return periodicWrapper;
+        }
+        ScheduledDirectPeriodicTask task = new ScheduledDirectPeriodicTask(decoratedRun);
         try {
-            Future<?> f = executor.get().scheduleAtFixedRate(decoratedRun, initialDelay, period, unit);
-            return Disposables.fromFuture(f);
+            Future<?> f = executor.get().scheduleAtFixedRate(task, initialDelay, period, unit);
+            task.setFuture(f);
+            return task;
         } catch (RejectedExecutionException ex) {
             RxJavaPlugins.onError(ex);
             return EmptyDisposable.INSTANCE;
@@ -133,8 +172,9 @@ public final class SingleScheduler extends Scheduler {
             this.tasks = new CompositeDisposable();
         }
 
+        @NonNull
         @Override
-        public Disposable schedule(Runnable run, long delay, TimeUnit unit) {
+        public Disposable schedule(@NonNull Runnable run, long delay, @NonNull TimeUnit unit) {
             if (disposed) {
                 return EmptyDisposable.INSTANCE;
             }

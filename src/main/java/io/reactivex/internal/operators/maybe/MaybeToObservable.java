@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,7 +20,7 @@ import io.reactivex.internal.fuseable.HasUpstreamMaybeSource;
 import io.reactivex.internal.observers.DeferredScalarDisposable;
 
 /**
- * Wraps a MaybeSource and exposes it as a Flowable, relaying signals in a backpressure-aware manner
+ * Wraps a MaybeSource and exposes it as an Observable, relaying signals in a backpressure-aware manner
  * and composes cancellation through.
  *
  * @param <T> the value type
@@ -39,27 +39,39 @@ public final class MaybeToObservable<T> extends Observable<T> implements HasUpst
     }
 
     @Override
-    protected void subscribeActual(Observer<? super T> s) {
-        source.subscribe(new MaybeToFlowableSubscriber<T>(s));
+    protected void subscribeActual(Observer<? super T> observer) {
+        source.subscribe(create(observer));
     }
 
-    static final class MaybeToFlowableSubscriber<T> extends DeferredScalarDisposable<T>
+    /**
+     * Creates a {@link MaybeObserver} wrapper around a {@link Observer}.
+     * <p>History: 2.1.11 - experimental
+     * @param <T> the value type
+     * @param downstream the downstream {@code Observer} to talk to
+     * @return the new MaybeObserver instance
+     * @since 2.2
+     */
+    public static <T> MaybeObserver<T> create(Observer<? super T> downstream) {
+        return new MaybeToObservableObserver<T>(downstream);
+    }
+
+    static final class MaybeToObservableObserver<T> extends DeferredScalarDisposable<T>
     implements MaybeObserver<T> {
 
         private static final long serialVersionUID = 7603343402964826922L;
 
-        Disposable d;
+        Disposable upstream;
 
-        MaybeToFlowableSubscriber(Observer<? super T> actual) {
-            super(actual);
+        MaybeToObservableObserver(Observer<? super T> downstream) {
+            super(downstream);
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
@@ -81,7 +93,7 @@ public final class MaybeToObservable<T> extends Observable<T> implements HasUpst
         @Override
         public void dispose() {
             super.dispose();
-            d.dispose();
+            upstream.dispose();
         }
     }
 }

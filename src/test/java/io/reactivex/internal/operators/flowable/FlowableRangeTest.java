@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.*;
@@ -23,28 +24,30 @@ import org.junit.Test;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.*;
-import io.reactivex.functions.Consumer;
+import io.reactivex.functions.*;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.fuseable.*;
 import io.reactivex.subscribers.*;
 
 public class FlowableRangeTest {
 
     @Test
     public void testRangeStartAt2Count3() {
-        Subscriber<Integer> observer = TestHelper.mockSubscriber();
+        Subscriber<Integer> subscriber = TestHelper.mockSubscriber();
 
-        Flowable.range(2, 3).subscribe(observer);
+        Flowable.range(2, 3).subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(2);
-        verify(observer, times(1)).onNext(3);
-        verify(observer, times(1)).onNext(4);
-        verify(observer, never()).onNext(5);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(2);
+        verify(subscriber, times(1)).onNext(3);
+        verify(subscriber, times(1)).onNext(4);
+        verify(subscriber, never()).onNext(5);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
     }
 
     @Test
     public void testRangeUnsubscribe() {
-        Subscriber<Integer> observer = TestHelper.mockSubscriber();
+        Subscriber<Integer> subscriber = TestHelper.mockSubscriber();
 
         final AtomicInteger count = new AtomicInteger();
 
@@ -54,14 +57,14 @@ public class FlowableRangeTest {
                 count.incrementAndGet();
             }
         })
-        .take(3).subscribe(observer);
+        .take(3).subscribe(subscriber);
 
-        verify(observer, times(1)).onNext(1);
-        verify(observer, times(1)).onNext(2);
-        verify(observer, times(1)).onNext(3);
-        verify(observer, never()).onNext(4);
-        verify(observer, never()).onError(any(Throwable.class));
-        verify(observer, times(1)).onComplete();
+        verify(subscriber, times(1)).onNext(1);
+        verify(subscriber, times(1)).onNext(2);
+        verify(subscriber, times(1)).onNext(3);
+        verify(subscriber, never()).onNext(4);
+        verify(subscriber, never()).onError(any(Throwable.class));
+        verify(subscriber, times(1)).onComplete();
         assertEquals(3, count.get());
     }
 
@@ -92,14 +95,14 @@ public class FlowableRangeTest {
 
     @Test
     public void testBackpressureViaRequest() {
-        Flowable<Integer> o = Flowable.range(1, Flowable.bufferSize());
+        Flowable<Integer> f = Flowable.range(1, Flowable.bufferSize());
 
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0L);
 
         ts.assertNoValues();
         ts.request(1);
 
-        o.subscribe(ts);
+        f.subscribe(ts);
 
         ts.assertValue(1);
 
@@ -120,14 +123,14 @@ public class FlowableRangeTest {
             list.add(i);
         }
 
-        Flowable<Integer> o = Flowable.range(1, list.size());
+        Flowable<Integer> f = Flowable.range(1, list.size());
 
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0L);
 
         ts.assertNoValues();
         ts.request(Long.MAX_VALUE); // infinite
 
-        o.subscribe(ts);
+        f.subscribe(ts);
 
         ts.assertValueSequence(list);
         ts.assertTerminated();
@@ -161,18 +164,21 @@ public class FlowableRangeTest {
         ts.assertValueSequence(list);
         ts.assertTerminated();
     }
+
     @Test
     public void testWithBackpressure1() {
         for (int i = 0; i < 100; i++) {
             testWithBackpressureOneByOne(i);
         }
     }
+
     @Test
     public void testWithBackpressureAllAtOnce() {
         for (int i = 0; i < 100; i++) {
             testWithBackpressureAllAtOnce(i);
         }
     }
+
     @Test
     public void testWithBackpressureRequestWayMore() {
         Flowable<Integer> source = Flowable.range(50, 100);
@@ -257,6 +263,7 @@ public class FlowableRangeTest {
         ts.assertNoErrors();
         ts.assertValues(Integer.MAX_VALUE - 1, Integer.MAX_VALUE);
     }
+
     @Test(timeout = 1000)
     public void testNearMaxValueWithBackpressure() {
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>(3L);
@@ -267,7 +274,6 @@ public class FlowableRangeTest {
         ts.assertValues(Integer.MAX_VALUE - 1, Integer.MAX_VALUE);
     }
 
-
     @Test
     public void negativeCount() {
         try {
@@ -276,5 +282,311 @@ public class FlowableRangeTest {
         } catch (IllegalArgumentException ex) {
             assertEquals("count >= 0 required but it was -1", ex.getMessage());
         }
+    }
+
+    @Test
+    public void requestWrongFusion() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ASYNC);
+
+        Flowable.range(1, 5)
+        .subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.NONE)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void countOne() {
+        Flowable.range(5495454, 1)
+            .test()
+            .assertResult(5495454);
+    }
+
+    @Test
+    public void fused() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ANY);
+
+        Flowable.range(1, 2).subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.SYNC)
+        .assertResult(1, 2);
+    }
+
+    @Test
+    public void fusedReject() {
+        TestSubscriber<Integer> ts = SubscriberFusion.newTest(QueueFuseable.ASYNC);
+
+        Flowable.range(1, 2).subscribe(ts);
+
+        SubscriberFusion.assertFusion(ts, QueueFuseable.NONE)
+        .assertResult(1, 2);
+    }
+
+    @Test
+    public void disposed() {
+        TestHelper.checkDisposed(Flowable.range(1, 2));
+    }
+
+    @Test
+    public void fusedClearIsEmpty() {
+        TestHelper.checkFusedIsEmptyClear(Flowable.range(1, 2));
+    }
+
+    @Test
+    public void noOverflow() {
+        Flowable.range(Integer.MAX_VALUE - 1, 2);
+        Flowable.range(Integer.MIN_VALUE, 2);
+        Flowable.range(Integer.MIN_VALUE, Integer.MAX_VALUE);
+    }
+
+    @Test
+    public void conditionalNormal() {
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .test()
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(Flowable.range(1, 5));
+
+        TestHelper.assertBadRequestReported(Flowable.range(1, 5).filter(Functions.alwaysTrue()));
+    }
+
+    @Test
+    public void conditionalNormalSlowpath() {
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .test(5)
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void conditionalSlowPathTakeExact() {
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .take(5)
+        .test()
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void slowPathTakeExact() {
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .take(5)
+        .test()
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void conditionalSlowPathRebatch() {
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .rebatchRequests(1)
+        .test()
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void slowPathRebatch() {
+        Flowable.range(1, 5)
+        .rebatchRequests(1)
+        .test()
+        .assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void slowPathCancel() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(2L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.range(1, 5)
+        .subscribe(ts);
+
+        ts.assertResult(1);
+    }
+
+    @Test
+    public void fastPathCancel() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.range(1, 5)
+        .subscribe(ts);
+
+        ts.assertResult(1);
+    }
+
+    @Test
+    public void conditionalSlowPathCancel() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(1L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1);
+    }
+
+    @Test
+    public void conditionalFastPathCancel() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                cancel();
+                onComplete();
+            }
+        };
+
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1);
+    }
+
+    @Test
+    public void conditionalRequestOneByOne() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(1L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                request(1);
+            }
+        };
+
+        Flowable.range(1, 5)
+        .filter(new Predicate<Integer>() {
+            @Override
+            public boolean test(Integer v) throws Exception {
+                return v % 2 == 0;
+            }
+        })
+        .subscribe(ts);
+
+        ts.assertResult(2, 4);
+    }
+
+    @Test
+    public void conditionalRequestOneByOne2() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(1L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                request(1);
+            }
+        };
+
+        Flowable.range(1, 5)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void fastPathCancelExact() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 5L) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.range(1, 5)
+        .subscribe(ts);
+
+        ts.assertResult(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void conditionalFastPathCancelExact() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 5L) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.range(1, 5)
+        .filter(new Predicate<Integer>() {
+            @Override
+            public boolean test(Integer v) throws Exception {
+                return v % 2 == 0;
+            }
+        })
+        .subscribe(ts);
+
+        ts.assertResult(2, 4);
+    }
+
+    @Test
+    public void conditionalCancel1() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(2L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 1) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.range(1, 2)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1);
+    }
+
+    @Test
+    public void conditionalCancel2() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(2L) {
+            @Override
+            public void onNext(Integer t) {
+                super.onNext(t);
+                if (t == 2) {
+                    cancel();
+                    onComplete();
+                }
+            }
+        };
+
+        Flowable.range(1, 2)
+        .filter(Functions.alwaysTrue())
+        .subscribe(ts);
+
+        ts.assertResult(1, 2);
     }
 }

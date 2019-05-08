@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -20,6 +20,8 @@ import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
 import io.reactivex.internal.disposables.DisposableHelper;
+import io.reactivex.internal.functions.Functions;
+import io.reactivex.observers.LambdaConsumerIntrospection;
 import io.reactivex.plugins.RxJavaPlugins;
 
 /**
@@ -29,8 +31,7 @@ import io.reactivex.plugins.RxJavaPlugins;
  */
 public final class MaybeCallbackObserver<T>
 extends AtomicReference<Disposable>
-implements MaybeObserver<T>, Disposable {
-
+implements MaybeObserver<T>, Disposable, LambdaConsumerIntrospection {
 
     private static final long serialVersionUID = -6076952298809384986L;
 
@@ -96,5 +97,8 @@ implements MaybeObserver<T>, Disposable {
         }
     }
 
-
+    @Override
+    public boolean hasCustomOnError() {
+        return onError != Functions.ON_ERROR_MISSING;
+    }
 }

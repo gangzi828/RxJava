@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,21 +15,26 @@ package io.reactivex.internal.operators.observable;
 
 import static org.junit.Assert.*;
 
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
+import io.reactivex.annotations.NonNull;
 import org.junit.Test;
 
 import io.reactivex.*;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.*;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Action;
 import io.reactivex.observers.TestObserver;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 
 public class ObservableUnsubscribeOnTest {
 
     @Test(timeout = 5000)
     public void unsubscribeWhenSubscribeOnAndUnsubscribeOnAreOnSameThread() throws InterruptedException {
-        UIEventLoopScheduler UI_EVENT_LOOP = new UIEventLoopScheduler();
+        UIEventLoopScheduler uiEventLoop = new UIEventLoopScheduler();
         try {
             final ThreadSubscription subscription = new ThreadSubscription();
             final AtomicReference<Thread> subscribeThread = new AtomicReference<Thread>();
@@ -41,13 +46,16 @@ public class ObservableUnsubscribeOnTest {
                     t1.onSubscribe(subscription);
                     t1.onNext(1);
                     t1.onNext(2);
-                    t1.onComplete();
+                    // observeOn will prevent canceling the upstream upon its termination now
+                    // this call is racing for that state in this test
+                    // not doing it will make sure the unsubscribeOn always gets through
+                    // t1.onComplete();
                 }
             });
 
             TestObserver<Integer> observer = new TestObserver<Integer>();
-            w.subscribeOn(UI_EVENT_LOOP).observeOn(Schedulers.computation())
-            .unsubscribeOn(UI_EVENT_LOOP)
+            w.subscribeOn(uiEventLoop).observeOn(Schedulers.computation())
+            .unsubscribeOn(uiEventLoop)
             .take(2)
             .subscribe(observer);
 
@@ -64,18 +72,18 @@ public class ObservableUnsubscribeOnTest {
 
             System.out.println("unsubscribeThread: " + unsubscribeThread);
             System.out.println("subscribeThread.get(): " + subscribeThread.get());
-            assertTrue(unsubscribeThread == UI_EVENT_LOOP.getThread());
+            assertTrue(unsubscribeThread.toString(), unsubscribeThread == uiEventLoop.getThread());
 
             observer.assertValues(1, 2);
             observer.assertTerminated();
         } finally {
-            UI_EVENT_LOOP.shutdown();
+            uiEventLoop.shutdown();
         }
     }
 
     @Test(timeout = 5000)
     public void unsubscribeWhenSubscribeOnAndUnsubscribeOnAreOnDifferentThreads() throws InterruptedException {
-        UIEventLoopScheduler UI_EVENT_LOOP = new UIEventLoopScheduler();
+        UIEventLoopScheduler uiEventLoop = new UIEventLoopScheduler();
         try {
             final ThreadSubscription subscription = new ThreadSubscription();
             final AtomicReference<Thread> subscribeThread = new AtomicReference<Thread>();
@@ -87,13 +95,16 @@ public class ObservableUnsubscribeOnTest {
                     t1.onSubscribe(subscription);
                     t1.onNext(1);
                     t1.onNext(2);
-                    t1.onComplete();
+                    // observeOn will prevent canceling the upstream upon its termination now
+                    // this call is racing for that state in this test
+                    // not doing it will make sure the unsubscribeOn always gets through
+                    // t1.onComplete();
                 }
             });
 
             TestObserver<Integer> observer = new TestObserver<Integer>();
             w.subscribeOn(Schedulers.newThread()).observeOn(Schedulers.computation())
-            .unsubscribeOn(UI_EVENT_LOOP)
+            .unsubscribeOn(uiEventLoop)
             .take(2)
             .subscribe(observer);
 
@@ -108,15 +119,15 @@ public class ObservableUnsubscribeOnTest {
             assertNotSame(Thread.currentThread(), subscribeThread.get());
             // True for Schedulers.newThread()
 
-            System.out.println("UI Thread: " + UI_EVENT_LOOP.getThread());
+            System.out.println("UI Thread: " + uiEventLoop.getThread());
             System.out.println("unsubscribeThread: " + unsubscribeThread);
             System.out.println("subscribeThread.get(): " + subscribeThread.get());
-            assertSame(unsubscribeThread, UI_EVENT_LOOP.getThread());
+            assertSame(unsubscribeThread, uiEventLoop.getThread());
 
             observer.assertValues(1, 2);
             observer.assertTerminated();
         } finally {
-            UI_EVENT_LOOP.shutdown();
+            uiEventLoop.shutdown();
         }
     }
 
@@ -175,6 +186,7 @@ public class ObservableUnsubscribeOnTest {
             }
         }
 
+        @NonNull
         @Override
         public Worker createWorker() {
             return eventLoop.createWorker();
@@ -184,5 +196,71 @@ public class ObservableUnsubscribeOnTest {
             return t;
         }
 
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).unsubscribeOn(Schedulers.single()));
+    }
+
+    @Test
+    public void normal() {
+        final int[] calls = { 0 };
+
+        Observable.just(1)
+        .doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                calls[0]++;
+            }
+        })
+        .unsubscribeOn(Schedulers.single())
+        .test()
+        .assertResult(1);
+
+        assertEquals(0, calls[0]);
+    }
+
+    @Test
+    public void error() {
+        final int[] calls = { 0 };
+
+        Observable.error(new TestException())
+        .doOnDispose(new Action() {
+            @Override
+            public void run() throws Exception {
+                calls[0]++;
+            }
+        })
+        .unsubscribeOn(Schedulers.single())
+        .test()
+        .assertFailure(TestException.class);
+
+        assertEquals(0, calls[0]);
+    }
+
+    @Test
+    public void signalAfterDispose() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Observable<Integer>() {
+                @Override
+                protected void subscribeActual(Observer<? super Integer> observer) {
+                    observer.onSubscribe(Disposables.empty());
+                    observer.onNext(1);
+                    observer.onNext(2);
+                    observer.onError(new TestException());
+                    observer.onComplete();
+                }
+            }
+            .unsubscribeOn(Schedulers.single())
+            .take(1)
+            .test()
+            .assertResult(1);
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class);
+        } finally {
+            RxJavaPlugins.reset();
+        }
     }
 }

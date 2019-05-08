@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -33,10 +33,42 @@ public class ObjectHelperTest {
     }
 
     @Test
-    public void compare() {
+    public void verifyPositiveInt() throws Exception {
+        assertEquals(1, ObjectHelper.verifyPositive(1, "param"));
+    }
 
+    @Test
+    public void verifyPositiveLong() throws Exception {
+        assertEquals(1L, ObjectHelper.verifyPositive(1L, "param"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void verifyPositiveIntFail() throws Exception {
+        assertEquals(-1, ObjectHelper.verifyPositive(-1, "param"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void verifyPositiveLongFail() throws Exception {
+        assertEquals(-1L, ObjectHelper.verifyPositive(-1L, "param"));
+    }
+
+    @Test
+    public void compare() {
         assertEquals(-1, ObjectHelper.compare(0, 2));
         assertEquals(0, ObjectHelper.compare(0, 0));
         assertEquals(1, ObjectHelper.compare(2, 0));
+    }
+
+    @Test
+    public void compareLong() {
+        assertEquals(-1, ObjectHelper.compare(0L, 2L));
+        assertEquals(0, ObjectHelper.compare(0L, 0L));
+        assertEquals(1, ObjectHelper.compare(2L, 0L));
+    }
+
+    @SuppressWarnings("deprecation")
+    @Test(expected = InternalError.class)
+    public void requireNonNullPrimitive() {
+        ObjectHelper.requireNonNull(0, "value");
     }
 }

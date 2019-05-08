@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package io.reactivex.internal.operators.single;
 import java.util.Iterator;
 
 import io.reactivex.*;
+import io.reactivex.annotations.Nullable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Function;
@@ -24,7 +25,7 @@ import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.internal.observers.BasicIntQueueDisposable;
 
 /**
- * Maps a success value into an Iterable and streams it back as a Flowable.
+ * Maps a success value into an Iterable and streams it back as an Observable.
  *
  * @param <T> the source value type
  * @param <R> the element type of the Iterable
@@ -42,8 +43,8 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
     }
 
     @Override
-    protected void subscribeActual(Observer<? super R> s) {
-        source.subscribe(new FlatMapIterableObserver<T, R>(s, mapper));
+    protected void subscribeActual(Observer<? super R> observer) {
+        source.subscribe(new FlatMapIterableObserver<T, R>(observer, mapper));
     }
 
     static final class FlatMapIterableObserver<T, R>
@@ -52,11 +53,11 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
 
         private static final long serialVersionUID = -8938804753851907758L;
 
-        final Observer<? super R> actual;
+        final Observer<? super R> downstream;
 
         final Function<? super T, ? extends Iterable<? extends R>> mapper;
 
-        Disposable d;
+        Disposable upstream;
 
         volatile Iterator<? extends R> it;
 
@@ -66,31 +67,31 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
 
         FlatMapIterableObserver(Observer<? super R> actual,
                 Function<? super T, ? extends Iterable<? extends R>> mapper) {
-            this.actual = actual;
+            this.downstream = actual;
             this.mapper = mapper;
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            if (DisposableHelper.validate(this.d, d)) {
-                this.d = d;
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onSuccess(T value) {
-            Observer<? super R> a = actual;
-            Iterator<? extends R> iter;
+            Observer<? super R> a = downstream;
+            Iterator<? extends R> iterator;
             boolean has;
             try {
-                iter = mapper.apply(value).iterator();
+                iterator = mapper.apply(value).iterator();
 
-                has = iter.hasNext();
+                has = iterator.hasNext();
             } catch (Throwable ex) {
                 Exceptions.throwIfFatal(ex);
-                actual.onError(ex);
+                downstream.onError(ex);
                 return;
             }
 
@@ -100,7 +101,7 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
             }
 
             if (outputFused) {
-                it = iter;
+                it = iterator;
                 a.onNext(null);
                 a.onComplete();
             } else {
@@ -112,7 +113,7 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
                     R v;
 
                     try {
-                        v = iter.next();
+                        v = iterator.next();
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
                         a.onError(ex);
@@ -125,11 +126,10 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
                         return;
                     }
 
-
                     boolean b;
 
                     try {
-                        b = iter.hasNext();
+                        b = iterator.hasNext();
                     } catch (Throwable ex) {
                         Exceptions.throwIfFatal(ex);
                         a.onError(ex);
@@ -146,15 +146,15 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
 
         @Override
         public void onError(Throwable e) {
-            d = DisposableHelper.DISPOSED;
-            actual.onError(e);
+            upstream = DisposableHelper.DISPOSED;
+            downstream.onError(e);
         }
 
         @Override
         public void dispose() {
             cancelled = true;
-            d.dispose();
-            d = DisposableHelper.DISPOSED;
+            upstream.dispose();
+            upstream = DisposableHelper.DISPOSED;
         }
 
         @Override
@@ -181,13 +181,14 @@ public final class SingleFlatMapIterableObservable<T, R> extends Observable<R> {
             return it == null;
         }
 
+        @Nullable
         @Override
         public R poll() throws Exception {
-            Iterator<? extends R> iter = it;
+            Iterator<? extends R> iterator = it;
 
-            if (iter != null) {
-                R v = ObjectHelper.requireNonNull(iter.next(), "The iterator returned a null value");
-                if (!iter.hasNext()) {
+            if (iterator != null) {
+                R v = ObjectHelper.requireNonNull(iterator.next(), "The iterator returned a null value");
+                if (!iterator.hasNext()) {
                     it = null;
                 }
                 return v;

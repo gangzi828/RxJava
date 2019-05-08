@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.*;
 import io.reactivex.*;
 import io.reactivex.disposables.*;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.internal.functions.ObjectHelper;
 import io.reactivex.plugins.RxJavaPlugins;
 
 public final class CompletableMergeIterable extends Completable {
@@ -29,29 +30,24 @@ public final class CompletableMergeIterable extends Completable {
     }
 
     @Override
-    public void subscribeActual(final CompletableObserver s) {
+    public void subscribeActual(final CompletableObserver observer) {
         final CompositeDisposable set = new CompositeDisposable();
 
-        s.onSubscribe(set);
+        observer.onSubscribe(set);
 
         Iterator<? extends CompletableSource> iterator;
 
         try {
-            iterator = sources.iterator();
+            iterator = ObjectHelper.requireNonNull(sources.iterator(), "The source iterator returned is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            s.onError(e);
-            return;
-        }
-
-        if (iterator == null) {
-            s.onError(new NullPointerException("The source iterator returned is null"));
+            observer.onError(e);
             return;
         }
 
         final AtomicInteger wip = new AtomicInteger(1);
-        final AtomicBoolean once = new AtomicBoolean();
 
+        MergeCompletableObserver shared = new MergeCompletableObserver(observer, set, wip);
         for (;;) {
             if (set.isDisposed()) {
                 return;
@@ -63,11 +59,7 @@ public final class CompletableMergeIterable extends Completable {
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 set.dispose();
-                if (once.compareAndSet(false, true)) {
-                    s.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
+                shared.onError(e);
                 return;
             }
 
@@ -82,15 +74,11 @@ public final class CompletableMergeIterable extends Completable {
             CompletableSource c;
 
             try {
-                c = iterator.next();
+                c = ObjectHelper.requireNonNull(iterator.next(), "The iterator returned a null CompletableSource");
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
                 set.dispose();
-                if (once.compareAndSet(false, true)) {
-                    s.onError(e);
-                } else {
-                    RxJavaPlugins.onError(e);
-                }
+                shared.onError(e);
                 return;
             }
 
@@ -98,50 +86,51 @@ public final class CompletableMergeIterable extends Completable {
                 return;
             }
 
-            if (c == null) {
-                set.dispose();
-                NullPointerException npe = new NullPointerException("A completable source is null");
-                if (once.compareAndSet(false, true)) {
-                    s.onError(npe);
-                } else {
-                    RxJavaPlugins.onError(npe);
-                }
-                return;
-            }
-
             wip.getAndIncrement();
 
-            c.subscribe(new CompletableObserver() {
-                @Override
-                public void onSubscribe(Disposable d) {
-                    set.add(d);
-                }
-
-                @Override
-                public void onError(Throwable e) {
-                    set.dispose();
-                    if (once.compareAndSet(false, true)) {
-                        s.onError(e);
-                    } else {
-                        RxJavaPlugins.onError(e);
-                    }
-                }
-
-                @Override
-                public void onComplete() {
-                    if (wip.decrementAndGet() == 0) {
-                        if (once.compareAndSet(false, true)) {
-                            s.onComplete();
-                        }
-                    }
-                }
-
-            });
+            c.subscribe(shared);
         }
 
-        if (wip.decrementAndGet() == 0) {
-            if (once.compareAndSet(false, true)) {
-                s.onComplete();
+        shared.onComplete();
+    }
+
+    static final class MergeCompletableObserver extends AtomicBoolean implements CompletableObserver {
+
+        private static final long serialVersionUID = -7730517613164279224L;
+
+        final CompositeDisposable set;
+
+        final CompletableObserver downstream;
+
+        final AtomicInteger wip;
+
+        MergeCompletableObserver(CompletableObserver actual, CompositeDisposable set, AtomicInteger wip) {
+            this.downstream = actual;
+            this.set = set;
+            this.wip = wip;
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+            set.add(d);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            set.dispose();
+            if (compareAndSet(false, true)) {
+                downstream.onError(e);
+            } else {
+                RxJavaPlugins.onError(e);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (wip.decrementAndGet() == 0) {
+                if (compareAndSet(false, true)) {
+                    downstream.onComplete();
+                }
             }
         }
     }

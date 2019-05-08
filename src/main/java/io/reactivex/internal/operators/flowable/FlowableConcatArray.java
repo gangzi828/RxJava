@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.reactivestreams.*;
 
-import io.reactivex.Flowable;
+import io.reactivex.*;
 import io.reactivex.exceptions.CompositeException;
 import io.reactivex.internal.subscriptions.SubscriptionArbiter;
 
@@ -40,11 +40,11 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
         parent.onComplete();
     }
 
-    static final class ConcatArraySubscriber<T> extends SubscriptionArbiter implements Subscriber<T> {
+    static final class ConcatArraySubscriber<T> extends SubscriptionArbiter implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -8158322871608889516L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
         final Publisher<? extends T>[] sources;
 
@@ -58,8 +58,9 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
 
         long produced;
 
-        ConcatArraySubscriber(Publisher<? extends T>[] sources, boolean delayError, Subscriber<? super T> actual) {
-            this.actual = actual;
+        ConcatArraySubscriber(Publisher<? extends T>[] sources, boolean delayError, Subscriber<? super T> downstream) {
+            super(false);
+            this.downstream = downstream;
             this.sources = sources;
             this.delayError = delayError;
             this.wip = new AtomicInteger();
@@ -73,7 +74,7 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
         @Override
         public void onNext(T t) {
             produced++;
-            actual.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
@@ -87,7 +88,7 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
                 list.add(t);
                 onComplete();
             } else {
-                actual.onError(t);
+                downstream.onError(t);
             }
         }
 
@@ -103,12 +104,12 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
                         List<Throwable> list = errors;
                         if (list != null) {
                             if (list.size() == 1) {
-                                actual.onError(list.get(0));
+                                downstream.onError(list.get(0));
                             } else {
-                                actual.onError(new CompositeException(list));
+                                downstream.onError(new CompositeException(list));
                             }
                         } else {
-                            actual.onComplete();
+                            downstream.onComplete();
                         }
                         return;
                     }
@@ -127,7 +128,7 @@ public final class FlowableConcatArray<T> extends Flowable<T> {
                             i++;
                             continue;
                         } else {
-                            actual.onError(ex);
+                            downstream.onError(ex);
                             return;
                         }
                     } else {

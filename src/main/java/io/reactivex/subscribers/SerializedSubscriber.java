@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,6 +14,7 @@ package io.reactivex.subscribers;
 
 import org.reactivestreams.*;
 
+import io.reactivex.FlowableSubscriber;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.*;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -21,20 +22,21 @@ import io.reactivex.plugins.RxJavaPlugins;
 /**
  * Serializes access to the onNext, onError and onComplete methods of another Subscriber.
  *
- * <p>Note that onSubscribe is not serialized in respect of the other methods so
- * make sure the Subscription is set before any of the other methods are called.
+ * <p>Note that {@link #onSubscribe(Subscription)} is not serialized in respect of the other methods so
+ * make sure the {@code onSubscribe} is called with a non-null {@code Subscription}
+ * before any of the other methods are called.
  *
  * <p>The implementation assumes that the actual Subscriber's methods don't throw.
  *
  * @param <T> the value type
  */
-public final class SerializedSubscriber<T> implements Subscriber<T>, Subscription {
-    final Subscriber<? super T> actual;
+public final class SerializedSubscriber<T> implements FlowableSubscriber<T>, Subscription {
+    final Subscriber<? super T> downstream;
     final boolean delayError;
 
     static final int QUEUE_LINK_SIZE = 4;
 
-    Subscription subscription;
+    Subscription upstream;
 
     boolean emitting;
     AppendOnlyLinkedArrayList<Object> queue;
@@ -43,10 +45,10 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
 
     /**
      * Construct a SerializedSubscriber by wrapping the given actual Subscriber.
-     * @param actual the actual Subscriber, not null (not verified)
+     * @param downstream the actual Subscriber, not null (not verified)
      */
-    public SerializedSubscriber(Subscriber<? super T> actual) {
-        this(actual, false);
+    public SerializedSubscriber(Subscriber<? super T> downstream) {
+        this(downstream, false);
     }
 
     /**
@@ -57,15 +59,15 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
      * @param delayError if true, errors are emitted after regular values have been emitted
      */
     public SerializedSubscriber(Subscriber<? super T> actual, boolean delayError) {
-        this.actual = actual;
+        this.downstream = actual;
         this.delayError = delayError;
     }
 
     @Override
     public void onSubscribe(Subscription s) {
-        if (SubscriptionHelper.validate(this.subscription, s)) {
-            this.subscription = s;
-            actual.onSubscribe(this);
+        if (SubscriptionHelper.validate(this.upstream, s)) {
+            this.upstream = s;
+            downstream.onSubscribe(this);
         }
     }
 
@@ -75,7 +77,7 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
             return;
         }
         if (t == null) {
-            subscription.cancel();
+            upstream.cancel();
             onError(new NullPointerException("onNext called with null. Null values are generally not allowed in 2.x operators and sources."));
             return;
         }
@@ -95,7 +97,7 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
             emitting = true;
         }
 
-        actual.onNext(t);
+        downstream.onNext(t);
 
         emitLoop();
     }
@@ -137,7 +139,7 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
             return;
         }
 
-        actual.onError(t);
+        downstream.onError(t);
         // no need to loop because this onError is the last event
     }
 
@@ -163,7 +165,7 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
             emitting = true;
         }
 
-        actual.onComplete();
+        downstream.onComplete();
         // no need to loop because this onComplete is the last event
     }
 
@@ -179,7 +181,7 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
                 queue = null;
             }
 
-            if (q.accept(actual)) {
+            if (q.accept(downstream)) {
                 return;
             }
         }
@@ -187,11 +189,11 @@ public final class SerializedSubscriber<T> implements Subscriber<T>, Subscriptio
 
     @Override
     public void request(long n) {
-        subscription.request(n);
+        upstream.request(n);
     }
 
     @Override
     public void cancel() {
-        subscription.cancel();
+        upstream.cancel();
     }
 }

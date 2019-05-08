@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.observable;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.util.*;
@@ -24,6 +25,8 @@ import org.mockito.Mockito;
 import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
+import io.reactivex.exceptions.TestException;
+import io.reactivex.functions.Function;
 
 public class ObservableToListTest {
 
@@ -106,10 +109,10 @@ public class ObservableToListTest {
     @Test
     public void testList() {
         Observable<String> w = Observable.fromIterable(Arrays.asList("one", "two", "three"));
-        Single<List<String>> observable = w.toList();
+        Single<List<String>> single = w.toList();
 
         SingleObserver<List<String>> observer = TestHelper.mockSingleObserver();
-        observable.subscribe(observer);
+        single.subscribe(observer);
         verify(observer, times(1)).onSuccess(Arrays.asList("one", "two", "three"));
         verify(observer, Mockito.never()).onError(any(Throwable.class));
     }
@@ -117,10 +120,10 @@ public class ObservableToListTest {
     @Test
     public void testListViaObservable() {
         Observable<String> w = Observable.fromIterable(Arrays.asList("one", "two", "three"));
-        Single<List<String>> observable = w.toList();
+        Single<List<String>> single = w.toList();
 
         SingleObserver<List<String>> observer = TestHelper.mockSingleObserver();
-        observable.subscribe(observer);
+        single.subscribe(observer);
         verify(observer, times(1)).onSuccess(Arrays.asList("one", "two", "three"));
         verify(observer, Mockito.never()).onError(any(Throwable.class));
     }
@@ -128,13 +131,13 @@ public class ObservableToListTest {
     @Test
     public void testListMultipleSubscribers() {
         Observable<String> w = Observable.fromIterable(Arrays.asList("one", "two", "three"));
-        Single<List<String>> observable = w.toList();
+        Single<List<String>> single = w.toList();
 
         SingleObserver<List<String>> o1 = TestHelper.mockSingleObserver();
-        observable.subscribe(o1);
+        single.subscribe(o1);
 
         SingleObserver<List<String>> o2 = TestHelper.mockSingleObserver();
-        observable.subscribe(o2);
+        single.subscribe(o2);
 
         List<String> expected = Arrays.asList("one", "two", "three");
 
@@ -149,10 +152,10 @@ public class ObservableToListTest {
     @Ignore("Null values are not allowed")
     public void testListWithNullValue() {
         Observable<String> w = Observable.fromIterable(Arrays.asList("one", null, "three"));
-        Single<List<String>> observable = w.toList();
+        Single<List<String>> single = w.toList();
 
         SingleObserver<List<String>> observer = TestHelper.mockSingleObserver();
-        observable.subscribe(observer);
+        single.subscribe(observer);
         verify(observer, times(1)).onSuccess(Arrays.asList("one", null, "three"));
         verify(observer, Mockito.never()).onError(any(Throwable.class));
     }
@@ -181,5 +184,109 @@ public class ObservableToListTest {
         .toList(4)
         .test()
         .assertResult(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.just(1).toList().toObservable());
+
+        TestHelper.checkDisposed(Observable.just(1).toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void error() {
+        Observable.error(new TestException())
+        .toList()
+        .toObservable()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void errorSingle() {
+        Observable.error(new TestException())
+        .toList()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void collectionSupplierThrows() {
+        Observable.just(1)
+        .toList(new Callable<Collection<Integer>>() {
+            @Override
+            public Collection<Integer> call() throws Exception {
+                throw new TestException();
+            }
+        })
+        .toObservable()
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void collectionSupplierReturnsNull() {
+        Observable.just(1)
+        .toList(new Callable<Collection<Integer>>() {
+            @Override
+            public Collection<Integer> call() throws Exception {
+                return null;
+            }
+        })
+        .toObservable()
+        .test()
+        .assertFailure(NullPointerException.class)
+        .assertErrorMessage("The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void singleCollectionSupplierThrows() {
+        Observable.just(1)
+        .toList(new Callable<Collection<Integer>>() {
+            @Override
+            public Collection<Integer> call() throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void singleCollectionSupplierReturnsNull() {
+        Observable.just(1)
+        .toList(new Callable<Collection<Integer>>() {
+            @Override
+            public Collection<Integer> call() throws Exception {
+                return null;
+            }
+        })
+        .test()
+        .assertFailure(NullPointerException.class)
+        .assertErrorMessage("The collectionSupplier returned a null collection. Null values are generally not allowed in 2.x operators and sources.");
+    }
+
+    @Test
+    public void doubleOnSubscribe() {
+        TestHelper.checkDoubleOnSubscribeObservable(new Function<Observable<Object>, Observable<List<Object>>>() {
+            @Override
+            public Observable<List<Object>> apply(Observable<Object> f)
+                    throws Exception {
+                return f.toList().toObservable();
+            }
+        });
+        TestHelper.checkDoubleOnSubscribeObservableToSingle(new Function<Observable<Object>, Single<List<Object>>>() {
+            @Override
+            public Single<List<Object>> apply(Observable<Object> f)
+                    throws Exception {
+                return f.toList();
+            }
+        });
     }
 }

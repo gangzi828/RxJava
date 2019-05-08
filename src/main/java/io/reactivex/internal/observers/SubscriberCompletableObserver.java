@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -22,10 +22,10 @@ import io.reactivex.internal.disposables.DisposableHelper;
 public final class SubscriberCompletableObserver<T> implements CompletableObserver, Subscription {
     final Subscriber<? super T> subscriber;
 
-    Disposable d;
+    Disposable upstream;
 
-    public SubscriberCompletableObserver(Subscriber<? super T> observer) {
-        this.subscriber = observer;
+    public SubscriberCompletableObserver(Subscriber<? super T> subscriber) {
+        this.subscriber = subscriber;
     }
 
     @Override
@@ -40,8 +40,8 @@ public final class SubscriberCompletableObserver<T> implements CompletableObserv
 
     @Override
     public void onSubscribe(Disposable d) {
-        if (DisposableHelper.validate(this.d, d)) {
-            this.d = d;
+        if (DisposableHelper.validate(this.upstream, d)) {
+            this.upstream = d;
 
             subscriber.onSubscribe(this);
         }
@@ -54,6 +54,6 @@ public final class SubscriberCompletableObserver<T> implements CompletableObserv
 
     @Override
     public void cancel() {
-        d.dispose();
+        upstream.dispose();
     }
 }

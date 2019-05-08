@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,18 +14,16 @@
 package io.reactivex.internal.operators.flowable;
 
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.Scheduler.Worker;
-import io.reactivex.disposables.Disposable;
-import io.reactivex.internal.disposables.DisposableHelper;
-import io.reactivex.internal.subscribers.FullArbiterSubscriber;
+import io.reactivex.internal.disposables.SequentialDisposable;
 import io.reactivex.internal.subscriptions.*;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.subscribers.SerializedSubscriber;
+
+import static io.reactivex.internal.util.ExceptionHelper.timeoutMessage;
 
 public final class FlowableTimeoutTimed<T> extends AbstractFlowableWithUpstream<T, T> {
     final long timeout;
@@ -33,7 +31,7 @@ public final class FlowableTimeoutTimed<T> extends AbstractFlowableWithUpstream<
     final Scheduler scheduler;
     final Publisher<? extends T> other;
 
-    public FlowableTimeoutTimed(Publisher<T> source,
+    public FlowableTimeoutTimed(Flowable<T> source,
             long timeout, TimeUnit unit, Scheduler scheduler, Publisher<? extends T> other) {
         super(source);
         this.timeout = timeout;
@@ -45,269 +43,282 @@ public final class FlowableTimeoutTimed<T> extends AbstractFlowableWithUpstream<
     @Override
     protected void subscribeActual(Subscriber<? super T> s) {
         if (other == null) {
-            source.subscribe(new TimeoutTimedSubscriber<T>(
-                    new SerializedSubscriber<T>(s), // because errors can race
-                    timeout, unit, scheduler.createWorker()));
+            TimeoutSubscriber<T> parent = new TimeoutSubscriber<T>(s, timeout, unit, scheduler.createWorker());
+            s.onSubscribe(parent);
+            parent.startTimeout(0L);
+            source.subscribe(parent);
         } else {
-            source.subscribe(new TimeoutTimedOtherSubscriber<T>(
-                    s, // the FullArbiter serializes
-                    timeout, unit, scheduler.createWorker(), other));
+            TimeoutFallbackSubscriber<T> parent = new TimeoutFallbackSubscriber<T>(s, timeout, unit, scheduler.createWorker(), other);
+            s.onSubscribe(parent);
+            parent.startTimeout(0L);
+            source.subscribe(parent);
         }
     }
 
-    static final class TimeoutTimedOtherSubscriber<T> implements Subscriber<T>, Disposable {
-        final Subscriber<? super T> actual;
+    static final class TimeoutSubscriber<T> extends AtomicLong
+    implements FlowableSubscriber<T>, Subscription, TimeoutSupport {
+
+        private static final long serialVersionUID = 3764492702657003550L;
+
+        final Subscriber<? super T> downstream;
+
         final long timeout;
+
         final TimeUnit unit;
+
         final Scheduler.Worker worker;
-        final Publisher<? extends T> other;
 
-        Subscription s;
+        final SequentialDisposable task;
 
-        final FullArbiter<T> arbiter;
+        final AtomicReference<Subscription> upstream;
 
-        final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
+        final AtomicLong requested;
 
-        static final Disposable NEW_TIMER = new Disposable() {
-            @Override
-            public void dispose() { }
-
-            @Override
-            public boolean isDisposed() {
-                return true;
-            }
-        };
-
-        volatile long index;
-
-        volatile boolean done;
-
-        TimeoutTimedOtherSubscriber(Subscriber<? super T> actual, long timeout, TimeUnit unit, Worker worker,
-                Publisher<? extends T> other) {
-            this.actual = actual;
+        TimeoutSubscriber(Subscriber<? super T> actual, long timeout, TimeUnit unit, Scheduler.Worker worker) {
+            this.downstream = actual;
             this.timeout = timeout;
             this.unit = unit;
             this.worker = worker;
-            this.other = other;
-            this.arbiter = new FullArbiter<T>(actual, this, 8);
+            this.task = new SequentialDisposable();
+            this.upstream = new AtomicReference<Subscription>();
+            this.requested = new AtomicLong();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                if (arbiter.setSubscription(s)) {
-                    actual.onSubscribe(arbiter);
-
-                    scheduleTimeout(0L);
-                }
-            }
+            SubscriptionHelper.deferredSetOnce(upstream, requested, s);
         }
 
         @Override
         public void onNext(T t) {
-            if (done) {
+            long idx = get();
+            if (idx == Long.MAX_VALUE || !compareAndSet(idx, idx + 1)) {
                 return;
             }
-            long idx = index + 1;
-            index = idx;
 
-            if (arbiter.onNext(t, s)) {
-                scheduleTimeout(idx);
-            }
+            task.get().dispose();
+
+            downstream.onNext(t);
+
+            startTimeout(idx + 1);
         }
 
-        void scheduleTimeout(final long idx) {
-            Disposable d = timer.get();
-            if (d != null) {
-                d.dispose();
-            }
-
-            if (timer.compareAndSet(d, NEW_TIMER)) {
-                d = worker.schedule(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (idx == index) {
-                            done = true;
-                            s.cancel();
-                            DisposableHelper.dispose(timer);
-                            worker.dispose();
-
-                            if (other == null) {
-                                actual.onError(new TimeoutException());
-                            } else {
-                                subscribeNext();
-                            }
-                        }
-                    }
-                }, timeout, unit);
-
-                if (!timer.compareAndSet(NEW_TIMER, d)) {
-                    d.dispose();
-                }
-            }
-        }
-
-        void subscribeNext() {
-            other.subscribe(new FullArbiterSubscriber<T>(arbiter));
+        void startTimeout(long nextIndex) {
+            task.replace(worker.schedule(new TimeoutTask(nextIndex, this), timeout, unit));
         }
 
         @Override
         public void onError(Throwable t) {
-            if (done) {
+            if (getAndSet(Long.MAX_VALUE) != Long.MAX_VALUE) {
+                task.dispose();
+
+                downstream.onError(t);
+
+                worker.dispose();
+            } else {
                 RxJavaPlugins.onError(t);
-                return;
             }
-            done = true;
-            worker.dispose();
-            DisposableHelper.dispose(timer);
-            arbiter.onError(t, s);
         }
 
         @Override
         public void onComplete() {
-            if (done) {
-                return;
-            }
-            done = true;
-            worker.dispose();
-            DisposableHelper.dispose(timer);
-            arbiter.onComplete(s);
-        }
+            if (getAndSet(Long.MAX_VALUE) != Long.MAX_VALUE) {
+                task.dispose();
 
-        @Override
-        public void dispose() {
-            worker.dispose();
-            DisposableHelper.dispose(timer);
-        }
+                downstream.onComplete();
 
-        @Override
-        public boolean isDisposed() {
-            return worker.isDisposed();
-        }
-    }
-
-    static final class TimeoutTimedSubscriber<T> implements Subscriber<T>, Disposable, Subscription {
-        final Subscriber<? super T> actual;
-        final long timeout;
-        final TimeUnit unit;
-        final Scheduler.Worker worker;
-
-        Subscription s;
-
-        final AtomicReference<Disposable> timer = new AtomicReference<Disposable>();
-
-        static final Disposable NEW_TIMER = new Disposable() {
-            @Override
-            public void dispose() { }
-
-            @Override
-            public boolean isDisposed() {
-                return true;
-            }
-        };
-
-        volatile long index;
-
-        volatile boolean done;
-
-        TimeoutTimedSubscriber(Subscriber<? super T> actual, long timeout, TimeUnit unit, Worker worker) {
-            this.actual = actual;
-            this.timeout = timeout;
-            this.unit = unit;
-            this.worker = worker;
-        }
-
-        @Override
-        public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
-                scheduleTimeout(0L);
+                worker.dispose();
             }
         }
 
         @Override
-        public void onNext(T t) {
-            if (done) {
-                return;
+        public void onTimeout(long idx) {
+            if (compareAndSet(idx, Long.MAX_VALUE)) {
+                SubscriptionHelper.cancel(upstream);
+
+                downstream.onError(new TimeoutException(timeoutMessage(timeout, unit)));
+
+                worker.dispose();
             }
-            long idx = index + 1;
-            index = idx;
-
-            actual.onNext(t);
-
-            scheduleTimeout(idx);
-        }
-
-        void scheduleTimeout(final long idx) {
-            Disposable d = timer.get();
-            if (d != null) {
-                d.dispose();
-            }
-
-            if (timer.compareAndSet(d, NEW_TIMER)) {
-                d = worker.schedule(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (idx == index) {
-                            done = true;
-                            dispose();
-
-                            actual.onError(new TimeoutException());
-                        }
-                    }
-                }, timeout, unit);
-
-                if (!timer.compareAndSet(NEW_TIMER, d)) {
-                    d.dispose();
-                }
-            }
-        }
-
-        @Override
-        public void onError(Throwable t) {
-            if (done) {
-                RxJavaPlugins.onError(t);
-                return;
-            }
-            done = true;
-            dispose();
-
-            actual.onError(t);
-        }
-
-        @Override
-        public void onComplete() {
-            if (done) {
-                return;
-            }
-            done = true;
-            dispose();
-
-            actual.onComplete();
-        }
-
-        @Override
-        public void dispose() {
-            worker.dispose();
-            DisposableHelper.dispose(timer);
-            s.cancel();
-        }
-
-        @Override
-        public boolean isDisposed() {
-            return worker.isDisposed();
         }
 
         @Override
         public void request(long n) {
-            s.request(n);
+            SubscriptionHelper.deferredRequest(upstream, requested, n);
         }
 
         @Override
         public void cancel() {
-            dispose();
+            SubscriptionHelper.cancel(upstream);
+            worker.dispose();
         }
+    }
+
+    static final class TimeoutTask implements Runnable {
+
+        final TimeoutSupport parent;
+
+        final long idx;
+
+        TimeoutTask(long idx, TimeoutSupport parent) {
+            this.idx = idx;
+            this.parent = parent;
+        }
+
+        @Override
+        public void run() {
+            parent.onTimeout(idx);
+        }
+    }
+
+    static final class TimeoutFallbackSubscriber<T> extends SubscriptionArbiter
+    implements FlowableSubscriber<T>, TimeoutSupport {
+
+        private static final long serialVersionUID = 3764492702657003550L;
+
+        final Subscriber<? super T> downstream;
+
+        final long timeout;
+
+        final TimeUnit unit;
+
+        final Scheduler.Worker worker;
+
+        final SequentialDisposable task;
+
+        final AtomicReference<Subscription> upstream;
+
+        final AtomicLong index;
+
+        long consumed;
+
+        Publisher<? extends T> fallback;
+
+        TimeoutFallbackSubscriber(Subscriber<? super T> actual, long timeout, TimeUnit unit,
+                Scheduler.Worker worker, Publisher<? extends T> fallback) {
+            super(true);
+            this.downstream = actual;
+            this.timeout = timeout;
+            this.unit = unit;
+            this.worker = worker;
+            this.fallback = fallback;
+            this.task = new SequentialDisposable();
+            this.upstream = new AtomicReference<Subscription>();
+            this.index = new AtomicLong();
+        }
+
+        @Override
+        public void onSubscribe(Subscription s) {
+            if (SubscriptionHelper.setOnce(upstream, s)) {
+                setSubscription(s);
+            }
+        }
+
+        @Override
+        public void onNext(T t) {
+            long idx = index.get();
+            if (idx == Long.MAX_VALUE || !index.compareAndSet(idx, idx + 1)) {
+                return;
+            }
+
+            task.get().dispose();
+
+            consumed++;
+
+            downstream.onNext(t);
+
+            startTimeout(idx + 1);
+        }
+
+        void startTimeout(long nextIndex) {
+            task.replace(worker.schedule(new TimeoutTask(nextIndex, this), timeout, unit));
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            if (index.getAndSet(Long.MAX_VALUE) != Long.MAX_VALUE) {
+                task.dispose();
+
+                downstream.onError(t);
+
+                worker.dispose();
+            } else {
+                RxJavaPlugins.onError(t);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (index.getAndSet(Long.MAX_VALUE) != Long.MAX_VALUE) {
+                task.dispose();
+
+                downstream.onComplete();
+
+                worker.dispose();
+            }
+        }
+
+        @Override
+        public void onTimeout(long idx) {
+            if (index.compareAndSet(idx, Long.MAX_VALUE)) {
+                SubscriptionHelper.cancel(upstream);
+
+                long c = consumed;
+                if (c != 0L) {
+                    produced(c);
+                }
+
+                Publisher<? extends T> f = fallback;
+                fallback = null;
+
+                f.subscribe(new FallbackSubscriber<T>(downstream, this));
+
+                worker.dispose();
+            }
+        }
+
+        @Override
+        public void cancel() {
+            super.cancel();
+            worker.dispose();
+        }
+    }
+
+    static final class FallbackSubscriber<T> implements FlowableSubscriber<T> {
+
+        final Subscriber<? super T> downstream;
+
+        final SubscriptionArbiter arbiter;
+
+        FallbackSubscriber(Subscriber<? super T> actual, SubscriptionArbiter arbiter) {
+            this.downstream = actual;
+            this.arbiter = arbiter;
+        }
+
+        @Override
+        public void onSubscribe(Subscription s) {
+            arbiter.setSubscription(s);
+        }
+
+        @Override
+        public void onNext(T t) {
+            downstream.onNext(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            downstream.onError(t);
+        }
+
+        @Override
+        public void onComplete() {
+            downstream.onComplete();
+        }
+    }
+
+    interface TimeoutSupport {
+
+        void onTimeout(long idx);
+
     }
 }

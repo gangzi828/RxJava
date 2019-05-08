@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -14,8 +14,10 @@
 package io.reactivex.internal.operators.flowable;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import java.lang.management.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
@@ -25,15 +27,17 @@ import org.mockito.InOrder;
 import org.reactivestreams.*;
 
 import io.reactivex.*;
-import io.reactivex.Flowable;
 import io.reactivex.Scheduler.Worker;
+import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.functions.*;
 import io.reactivex.internal.functions.Functions;
+import io.reactivex.internal.fuseable.HasUpstreamPublisher;
 import io.reactivex.internal.operators.flowable.FlowableReplay.*;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.processors.PublishProcessor;
 import io.reactivex.schedulers.*;
 import io.reactivex.subscribers.TestSubscriber;
@@ -43,44 +47,44 @@ public class FlowableReplayTest {
     public void testBufferedReplay() {
         PublishProcessor<Integer> source = PublishProcessor.create();
 
-        ConnectableFlowable<Integer> co = source.replay(3);
-        co.connect();
+        ConnectableFlowable<Integer> cf = source.replay(3);
+        cf.connect();
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
             source.onNext(1);
             source.onNext(2);
             source.onNext(3);
 
-            inOrder.verify(observer1, times(1)).onNext(1);
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(1);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
 
             source.onNext(4);
             source.onComplete();
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
         }
     }
 
@@ -88,14 +92,14 @@ public class FlowableReplayTest {
     public void testBufferedWindowReplay() {
         PublishProcessor<Integer> source = PublishProcessor.create();
         TestScheduler scheduler = new TestScheduler();
-        ConnectableFlowable<Integer> co = source.replay(3, 100, TimeUnit.MILLISECONDS, scheduler);
-        co.connect();
+        ConnectableFlowable<Integer> cf = source.replay(3, 100, TimeUnit.MILLISECONDS, scheduler);
+        cf.connect();
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
             source.onNext(1);
             scheduler.advanceTimeBy(10, TimeUnit.MILLISECONDS);
@@ -104,33 +108,33 @@ public class FlowableReplayTest {
             source.onNext(3);
             scheduler.advanceTimeBy(10, TimeUnit.MILLISECONDS);
 
-            inOrder.verify(observer1, times(1)).onNext(1);
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(1);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
 
             source.onNext(4);
             source.onNext(5);
             scheduler.advanceTimeBy(90, TimeUnit.MILLISECONDS);
 
-            inOrder.verify(observer1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
 
-            inOrder.verify(observer1, times(1)).onNext(5);
+            inOrder.verify(subscriber1, times(1)).onNext(5);
 
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onNext(5);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onNext(5);
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
         }
     }
 
@@ -140,14 +144,14 @@ public class FlowableReplayTest {
 
         PublishProcessor<Integer> source = PublishProcessor.create();
 
-        ConnectableFlowable<Integer> co = source.replay(100, TimeUnit.MILLISECONDS, scheduler);
-        co.connect();
+        ConnectableFlowable<Integer> cf = source.replay(100, TimeUnit.MILLISECONDS, scheduler);
+        cf.connect();
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
             source.onNext(1);
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
@@ -158,25 +162,25 @@ public class FlowableReplayTest {
             source.onComplete();
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
 
-            inOrder.verify(observer1, times(1)).onNext(1);
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(1);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            cf.subscribe(subscriber1);
+            inOrder.verify(subscriber1, never()).onNext(3);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
         }
     }
 
@@ -205,37 +209,37 @@ public class FlowableReplayTest {
         Flowable<Integer> co = source.replay(selector);
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
             source.onNext(1);
             source.onNext(2);
             source.onNext(3);
 
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onNext(6);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onNext(6);
 
             source.onNext(4);
             source.onComplete();
-            inOrder.verify(observer1, times(1)).onNext(8);
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onNext(8);
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
 
@@ -267,37 +271,37 @@ public class FlowableReplayTest {
         Flowable<Integer> co = source.replay(selector, 3);
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
             source.onNext(1);
             source.onNext(2);
             source.onNext(3);
 
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onNext(6);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onNext(6);
 
             source.onNext(4);
             source.onComplete();
-            inOrder.verify(observer1, times(1)).onNext(8);
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onNext(8);
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
         }
     }
 
@@ -329,10 +333,10 @@ public class FlowableReplayTest {
         Flowable<Integer> co = source.replay(selector, 100, TimeUnit.MILLISECONDS, scheduler);
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
             source.onNext(1);
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
@@ -343,24 +347,24 @@ public class FlowableReplayTest {
             source.onComplete();
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
 
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onNext(6);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onNext(6);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
 
         }
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            co.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onComplete();
+            inOrder.verify(subscriber1, times(1)).onComplete();
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onError(any(Throwable.class));
+            verify(subscriber1, never()).onError(any(Throwable.class));
         }
     }
 
@@ -368,45 +372,45 @@ public class FlowableReplayTest {
     public void testBufferedReplayError() {
         PublishProcessor<Integer> source = PublishProcessor.create();
 
-        ConnectableFlowable<Integer> co = source.replay(3);
-        co.connect();
+        ConnectableFlowable<Integer> cf = source.replay(3);
+        cf.connect();
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
             source.onNext(1);
             source.onNext(2);
             source.onNext(3);
 
-            inOrder.verify(observer1, times(1)).onNext(1);
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(1);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
 
             source.onNext(4);
             source.onError(new RuntimeException("Forced failure"));
 
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onError(any(RuntimeException.class));
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onError(any(RuntimeException.class));
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onComplete();
+            verify(subscriber1, never()).onComplete();
 
         }
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
-            inOrder.verify(observer1, times(1)).onNext(4);
-            inOrder.verify(observer1, times(1)).onError(any(RuntimeException.class));
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(4);
+            inOrder.verify(subscriber1, times(1)).onError(any(RuntimeException.class));
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onComplete();
+            verify(subscriber1, never()).onComplete();
         }
     }
 
@@ -416,14 +420,14 @@ public class FlowableReplayTest {
 
         PublishProcessor<Integer> source = PublishProcessor.create();
 
-        ConnectableFlowable<Integer> co = source.replay(100, TimeUnit.MILLISECONDS, scheduler);
-        co.connect();
+        ConnectableFlowable<Integer> cf = source.replay(100, TimeUnit.MILLISECONDS, scheduler);
+        cf.connect();
 
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
+            cf.subscribe(subscriber1);
 
             source.onNext(1);
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
@@ -434,25 +438,25 @@ public class FlowableReplayTest {
             source.onError(new RuntimeException("Forced failure"));
             scheduler.advanceTimeBy(60, TimeUnit.MILLISECONDS);
 
-            inOrder.verify(observer1, times(1)).onNext(1);
-            inOrder.verify(observer1, times(1)).onNext(2);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            inOrder.verify(subscriber1, times(1)).onNext(1);
+            inOrder.verify(subscriber1, times(1)).onNext(2);
+            inOrder.verify(subscriber1, times(1)).onNext(3);
 
-            inOrder.verify(observer1, times(1)).onError(any(RuntimeException.class));
+            inOrder.verify(subscriber1, times(1)).onError(any(RuntimeException.class));
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onComplete();
+            verify(subscriber1, never()).onComplete();
 
         }
         {
-            Subscriber<Object> observer1 = TestHelper.mockSubscriber();
-            InOrder inOrder = inOrder(observer1);
+            Subscriber<Object> subscriber1 = TestHelper.mockSubscriber();
+            InOrder inOrder = inOrder(subscriber1);
 
-            co.subscribe(observer1);
-            inOrder.verify(observer1, times(1)).onNext(3);
+            cf.subscribe(subscriber1);
+            inOrder.verify(subscriber1, never()).onNext(3);
 
-            inOrder.verify(observer1, times(1)).onError(any(RuntimeException.class));
+            inOrder.verify(subscriber1, times(1)).onError(any(RuntimeException.class));
             inOrder.verifyNoMoreInteractions();
-            verify(observer1, never()).onComplete();
+            verify(subscriber1, never()).onComplete();
         }
     }
 
@@ -471,8 +475,8 @@ public class FlowableReplayTest {
         Flowable<Integer> result = source.replay(
         new Function<Flowable<Integer>, Flowable<Integer>>() {
             @Override
-            public Flowable<Integer> apply(Flowable<Integer> o) {
-                return o.take(2);
+            public Flowable<Integer> apply(Flowable<Integer> f) {
+                return f.take(2);
             }
         });
 
@@ -503,7 +507,6 @@ public class FlowableReplayTest {
         }
     }
 
-
     /*
      * test the basic expectation of OperatorMulticast via replay
      */
@@ -518,7 +521,7 @@ public class FlowableReplayTest {
         Subscriber<Integer> spiedSubscriberAfterConnect = TestHelper.mockSubscriber();
 
         // Flowable under test
-        Flowable<Integer> source = Flowable.just(1,2);
+        Flowable<Integer> source = Flowable.just(1, 2);
 
         ConnectableFlowable<Integer> replay = source
                 .doOnNext(sourceNext)
@@ -542,7 +545,7 @@ public class FlowableReplayTest {
         verifyObserverMock(spiedSubscriberBeforeConnect, 2, 4);
         verifyObserverMock(spiedSubscriberAfterConnect, 2, 4);
 
-        verify(sourceUnsubscribed, times(1)).run();
+        verify(sourceUnsubscribed, never()).run();
 
         verifyNoMoreInteractions(sourceNext);
         verifyNoMoreInteractions(sourceCompleted);
@@ -555,7 +558,7 @@ public class FlowableReplayTest {
     /**
      * Specifically test interaction with a Scheduler with subscribeOn.
      *
-     * @throws Exception
+     * @throws Exception functional interfaces declare throws Exception
      */
     @SuppressWarnings("unchecked")
     @Test
@@ -598,11 +601,9 @@ public class FlowableReplayTest {
         verifyObserverMock(mockObserverBeforeConnect, 2, 6);
         verifyObserverMock(mockObserverAfterConnect, 2, 6);
 
-        // FIXME not supported
-//        verify(spiedWorker, times(1)).isUnsubscribed();
         // FIXME publish calls cancel too
-        verify(spiedWorker, times(2)).dispose();
-        verify(sourceUnsubscribed, times(1)).run();
+        verify(spiedWorker, times(1)).dispose();
+        verify(sourceUnsubscribed, never()).run();
 
         verifyNoMoreInteractions(sourceNext);
         verifyNoMoreInteractions(sourceCompleted);
@@ -617,7 +618,7 @@ public class FlowableReplayTest {
     /**
      * Specifically test interaction with a Scheduler with subscribeOn.
      *
-     * @throws Exception
+     * @throws Exception functional interfaces declare throws Exception
      */
     @SuppressWarnings("unchecked")
     @Test
@@ -664,11 +665,9 @@ public class FlowableReplayTest {
         verifyObserver(mockObserverBeforeConnect, 2, 2, illegalArgumentException);
         verifyObserver(mockObserverAfterConnect, 2, 2, illegalArgumentException);
 
-        // FIXME no longer supported
-//        verify(spiedWorker, times(1)).isUnsubscribed();
         // FIXME publish also calls cancel
-        verify(spiedWorker, times(2)).dispose();
-        verify(sourceUnsubscribed, times(1)).run();
+        verify(spiedWorker, times(1)).dispose();
+        verify(sourceUnsubscribed, never()).run();
 
         verifyNoMoreInteractions(sourceNext);
         verifyNoMoreInteractions(sourceCompleted);
@@ -697,7 +696,6 @@ public class FlowableReplayTest {
         return spy(new InprocessWorker(mockDisposable));
     }
 
-
     private static class InprocessWorker extends Worker {
         private final Disposable mockDisposable;
         public boolean unsubscribed;
@@ -706,14 +704,16 @@ public class FlowableReplayTest {
             this.mockDisposable = mockDisposable;
         }
 
+        @NonNull
         @Override
-        public Disposable schedule(Runnable action) {
+        public Disposable schedule(@NonNull Runnable action) {
             action.run();
             return mockDisposable; // this subscription is returned but discarded
         }
 
+        @NonNull
         @Override
-        public Disposable schedule(Runnable action, long delayTime, TimeUnit unit) {
+        public Disposable schedule(@NonNull Runnable action, long delayTime, @NonNull TimeUnit unit) {
             action.run();
             return mockDisposable;
         }
@@ -770,7 +770,7 @@ public class FlowableReplayTest {
         buf.next(2);
         test.advanceTimeBy(1, TimeUnit.SECONDS);
         buf.collect(values);
-        Assert.assertEquals(Arrays.asList(1, 2), values);
+        Assert.assertEquals(Arrays.asList(2), values);
 
         buf.next(3);
         buf.next(4);
@@ -806,17 +806,17 @@ public class FlowableReplayTest {
                         requested.addAndGet(t);
                     }
                 });
-        ConnectableFlowable<Integer> co = source.replay();
+        ConnectableFlowable<Integer> cf = source.replay();
 
         TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>(10L);
         TestSubscriber<Integer> ts2 = new TestSubscriber<Integer>(90L);
 
-        co.subscribe(ts1);
-        co.subscribe(ts2);
+        cf.subscribe(ts1);
+        cf.subscribe(ts2);
 
         ts2.request(10);
 
-        co.connect();
+        cf.connect();
 
         ts1.assertValueCount(10);
         ts1.assertNotTerminated();
@@ -837,17 +837,17 @@ public class FlowableReplayTest {
                         requested.addAndGet(t);
                     }
                 });
-        ConnectableFlowable<Integer> co = source.replay(50);
+        ConnectableFlowable<Integer> cf = source.replay(50);
 
         TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>(10L);
         TestSubscriber<Integer> ts2 = new TestSubscriber<Integer>(90L);
 
-        co.subscribe(ts1);
-        co.subscribe(ts2);
+        cf.subscribe(ts1);
+        cf.subscribe(ts2);
 
         ts2.request(10);
 
-        co.connect();
+        cf.connect();
 
         ts1.assertValueCount(10);
         ts1.assertNotTerminated();
@@ -875,6 +875,7 @@ public class FlowableReplayTest {
             assertEquals((Integer)i, onNextEvents.get(i));
         }
     }
+
     @Test
     public void testColdReplayBackpressure() {
         Flowable<Integer> source = Flowable.range(0, 1000).replay().autoConnect();
@@ -899,19 +900,19 @@ public class FlowableReplayTest {
     @Test
     public void testCache() throws InterruptedException {
         final AtomicInteger counter = new AtomicInteger();
-        Flowable<String> o = Flowable.unsafeCreate(new Publisher<String>() {
+        Flowable<String> f = Flowable.unsafeCreate(new Publisher<String>() {
 
             @Override
-            public void subscribe(final Subscriber<? super String> observer) {
-                observer.onSubscribe(new BooleanSubscription());
+            public void subscribe(final Subscriber<? super String> subscriber) {
+                subscriber.onSubscribe(new BooleanSubscription());
                 new Thread(new Runnable() {
 
                     @Override
                     public void run() {
                         counter.incrementAndGet();
                         System.out.println("published observable being executed");
-                        observer.onNext("one");
-                        observer.onComplete();
+                        subscriber.onNext("one");
+                        subscriber.onComplete();
                     }
                 }).start();
             }
@@ -921,7 +922,7 @@ public class FlowableReplayTest {
         final CountDownLatch latch = new CountDownLatch(2);
 
         // subscribe once
-        o.subscribe(new Consumer<String>() {
+        f.subscribe(new Consumer<String>() {
 
             @Override
             public void accept(String v) {
@@ -932,7 +933,7 @@ public class FlowableReplayTest {
         });
 
         // subscribe again
-        o.subscribe(new Consumer<String>() {
+        f.subscribe(new Consumer<String>() {
 
             @Override
             public void accept(String v) {
@@ -951,11 +952,11 @@ public class FlowableReplayTest {
     @Test
     public void testUnsubscribeSource() throws Exception {
         Action unsubscribe = mock(Action.class);
-        Flowable<Integer> o = Flowable.just(1).doOnCancel(unsubscribe).cache();
-        o.subscribe();
-        o.subscribe();
-        o.subscribe();
-        verify(unsubscribe, times(1)).run();
+        Flowable<Integer> f = Flowable.just(1).doOnCancel(unsubscribe).replay().autoConnect();
+        f.subscribe();
+        f.subscribe();
+        f.subscribe();
+        verify(unsubscribe, never()).run();
     }
 
     @Test
@@ -968,8 +969,6 @@ public class FlowableReplayTest {
         ts.assertNoErrors();
         ts.assertTerminated();
         ts.assertValues(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-        // FIXME no longer assertable
-//        ts.assertUnsubscribed();
     }
 
     @Test
@@ -996,6 +995,7 @@ public class FlowableReplayTest {
             assertEquals(10000, ts2.values().size());
         }
     }
+
     @Test
     public void testAsyncComeAndGo() {
         Flowable<Long> source = Flowable.interval(1, 1, TimeUnit.MILLISECONDS)
@@ -1061,7 +1061,6 @@ public class FlowableReplayTest {
         Flowable<Integer> source = Flowable.range(1, 10)
                 .concatWith(Flowable.<Integer>error(new TestException()))
                 .replay().autoConnect();
-
 
         TestSubscriber<Integer> ts = new TestSubscriber<Integer>();
         source.subscribe(ts);
@@ -1168,7 +1167,6 @@ public class FlowableReplayTest {
         ts22.assertNoErrors();
         ts22.dispose();
 
-
         TestSubscriber<Integer> ts3 = new TestSubscriber<Integer>();
 
         source.subscribe(ts3);
@@ -1223,7 +1221,6 @@ public class FlowableReplayTest {
         ts22.assertValues(2);
         ts22.assertNoErrors();
         ts22.dispose();
-
 
         TestSubscriber<Integer> ts3 = new TestSubscriber<Integer>();
 
@@ -1297,4 +1294,750 @@ public class FlowableReplayTest {
         .assertResult(1);
     }
 
+    @Test
+    public void source() {
+        Flowable<Integer> source = Flowable.range(1, 3);
+
+        assertSame(source, (((HasUpstreamPublisher<?>)source.replay())).source());
+    }
+
+    @Test
+    public void connectRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final ConnectableFlowable<Integer> cf = Flowable.range(1, 3).replay();
+
+            Runnable r = new Runnable() {
+                @Override
+                public void run() {
+                    cf.connect();
+                }
+            };
+
+            TestHelper.race(r, r);
+        }
+    }
+
+    @Test
+    public void subscribeRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final ConnectableFlowable<Integer> cf = Flowable.range(1, 3).replay();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+            final TestSubscriber<Integer> ts2 = new TestSubscriber<Integer>();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cf.subscribe(ts1);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    cf.subscribe(ts2);
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void addRemoveRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final ConnectableFlowable<Integer> cf = Flowable.range(1, 3).replay();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+            final TestSubscriber<Integer> ts2 = new TestSubscriber<Integer>();
+
+            cf.subscribe(ts1);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ts1.cancel();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    cf.subscribe(ts2);
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void cancelOnArrival() {
+        Flowable.range(1, 2)
+        .replay(Integer.MAX_VALUE)
+        .autoConnect()
+        .test(Long.MAX_VALUE, true)
+        .assertEmpty();
+    }
+
+    @Test
+    public void cancelOnArrival2() {
+        ConnectableFlowable<Integer> cf = PublishProcessor.<Integer>create()
+        .replay(Integer.MAX_VALUE);
+
+        cf.test();
+
+        cf
+        .autoConnect()
+        .test(Long.MAX_VALUE, true)
+        .assertEmpty();
+    }
+
+    @Test
+    public void connectConsumerThrows() {
+        ConnectableFlowable<Integer> cf = Flowable.range(1, 2)
+        .replay();
+
+        try {
+            cf.connect(new Consumer<Disposable>() {
+                @Override
+                public void accept(Disposable t) throws Exception {
+                    throw new TestException();
+                }
+            });
+            fail("Should have thrown");
+        } catch (TestException ex) {
+            // expected
+        }
+
+        cf.test().assertEmpty().cancel();
+
+        cf.connect();
+
+        cf.test().assertResult(1, 2);
+    }
+
+    @Test
+    public void badSource() {
+        List<Throwable> errors = TestHelper.trackPluginErrors();
+        try {
+            new Flowable<Integer>() {
+                @Override
+                protected void subscribeActual(Subscriber<? super Integer> subscriber) {
+                    subscriber.onSubscribe(new BooleanSubscription());
+                    subscriber.onError(new TestException("First"));
+                    subscriber.onNext(1);
+                    subscriber.onError(new TestException("Second"));
+                    subscriber.onComplete();
+                }
+            }.replay()
+            .autoConnect()
+            .test()
+            .assertFailureAndMessage(TestException.class, "First");
+
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Second");
+        } finally {
+            RxJavaPlugins.reset();
+        }
+    }
+
+    @Test
+    public void subscribeOnNextRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+            final ConnectableFlowable<Integer> cf = pp.replay();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cf.subscribe(ts1);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    for (int j = 0; j < 1000; j++) {
+                        pp.onNext(j);
+                    }
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void unsubscribeOnNextRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+            final ConnectableFlowable<Integer> cf = pp.replay();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+
+            cf.subscribe(ts1);
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    ts1.dispose();
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    for (int j = 0; j < 1000; j++) {
+                        pp.onNext(j);
+                    }
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void unsubscribeReplayRace() {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
+            final ConnectableFlowable<Integer> cf = Flowable.range(1, 1000).replay();
+
+            final TestSubscriber<Integer> ts1 = new TestSubscriber<Integer>();
+
+            cf.connect();
+
+            Runnable r1 = new Runnable() {
+                @Override
+                public void run() {
+                    cf.subscribe(ts1);
+                }
+            };
+
+            Runnable r2 = new Runnable() {
+                @Override
+                public void run() {
+                    ts1.dispose();
+                }
+            };
+
+            TestHelper.race(r1, r2);
+        }
+    }
+
+    @Test
+    public void reentrantOnNext() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                if (t == 1) {
+                    pp.onNext(2);
+                    pp.onComplete();
+                }
+                super.onNext(t);
+            }
+        };
+
+        pp.replay().autoConnect().subscribe(ts);
+
+        pp.onNext(1);
+
+        ts.assertResult(1, 2);
+    }
+
+    @Test
+    public void reentrantOnNextBound() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                if (t == 1) {
+                    pp.onNext(2);
+                    pp.onComplete();
+                }
+                super.onNext(t);
+            }
+        };
+
+        pp.replay(10).autoConnect().subscribe(ts);
+
+        pp.onNext(1);
+
+        ts.assertResult(1, 2);
+    }
+
+    @Test
+    public void reentrantOnNextCancel() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                if (t == 1) {
+                    pp.onNext(2);
+                    cancel();
+                }
+                super.onNext(t);
+            }
+        };
+
+        pp.replay().autoConnect().subscribe(ts);
+
+        pp.onNext(1);
+
+        ts.assertValues(1);
+    }
+
+    @Test
+    public void reentrantOnNextCancelBounded() {
+        final PublishProcessor<Integer> pp = PublishProcessor.create();
+
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>() {
+            @Override
+            public void onNext(Integer t) {
+                if (t == 1) {
+                    pp.onNext(2);
+                    cancel();
+                }
+                super.onNext(t);
+            }
+        };
+
+        pp.replay(10).autoConnect().subscribe(ts);
+
+        pp.onNext(1);
+
+        ts.assertValues(1);
+    }
+
+    @Test
+    public void replayMaxInt() {
+        Flowable.range(1, 2)
+        .replay(Integer.MAX_VALUE)
+        .autoConnect()
+        .test()
+        .assertResult(1, 2);
+    }
+
+    @Test
+    public void testTimedAndSizedTruncationError() {
+        TestScheduler test = new TestScheduler();
+        SizeAndTimeBoundReplayBuffer<Integer> buf = new SizeAndTimeBoundReplayBuffer<Integer>(2, 2000, TimeUnit.MILLISECONDS, test);
+
+        Assert.assertFalse(buf.hasCompleted());
+        Assert.assertFalse(buf.hasError());
+
+        List<Integer> values = new ArrayList<Integer>();
+
+        buf.next(1);
+        test.advanceTimeBy(1, TimeUnit.SECONDS);
+        buf.next(2);
+        test.advanceTimeBy(1, TimeUnit.SECONDS);
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(2), values);
+
+        buf.next(3);
+        buf.next(4);
+        values.clear();
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(3, 4), values);
+
+        test.advanceTimeBy(2, TimeUnit.SECONDS);
+        buf.next(5);
+
+        values.clear();
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(5), values);
+        Assert.assertFalse(buf.hasCompleted());
+        Assert.assertFalse(buf.hasError());
+
+        test.advanceTimeBy(2, TimeUnit.SECONDS);
+        buf.error(new TestException());
+
+        values.clear();
+        buf.collect(values);
+        Assert.assertTrue(values.isEmpty());
+
+        Assert.assertEquals(1, buf.size);
+        Assert.assertFalse(buf.hasCompleted());
+        Assert.assertTrue(buf.hasError());
+    }
+
+    @Test
+    public void testSizedTruncation() {
+        SizeBoundReplayBuffer<Integer> buf = new SizeBoundReplayBuffer<Integer>(2);
+        List<Integer> values = new ArrayList<Integer>();
+
+        buf.next(1);
+        buf.next(2);
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(1, 2), values);
+
+        buf.next(3);
+        buf.next(4);
+        values.clear();
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(3, 4), values);
+
+        buf.next(5);
+
+        values.clear();
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(4, 5), values);
+        Assert.assertFalse(buf.hasCompleted());
+
+        buf.complete();
+
+        values.clear();
+        buf.collect(values);
+        Assert.assertEquals(Arrays.asList(4, 5), values);
+
+        Assert.assertEquals(3, buf.size);
+        Assert.assertTrue(buf.hasCompleted());
+        Assert.assertFalse(buf.hasError());
+    }
+
+    @Test
+    public void delayedUpstreamOnSubscribe() {
+        final Subscriber<?>[] sub = { null };
+
+        new Flowable<Integer>() {
+            @Override
+            protected void subscribeActual(Subscriber<? super Integer> s) {
+                sub[0] = s;
+            }
+        }
+        .replay()
+        .connect()
+        .dispose();
+
+        BooleanSubscription bs = new BooleanSubscription();
+
+        sub[0].onSubscribe(bs);
+
+        assertTrue(bs.isCancelled());
+    }
+
+    @Test
+    public void timedNoOutdatedData() {
+        TestScheduler scheduler = new TestScheduler();
+
+        Flowable<Integer> source = Flowable.just(1)
+                .replay(2, TimeUnit.SECONDS, scheduler)
+                .autoConnect();
+
+        source.test().assertResult(1);
+
+        source.test().assertResult(1);
+
+        scheduler.advanceTimeBy(3, TimeUnit.SECONDS);
+
+        source.test().assertResult();
+    }
+
+    @Test
+    public void replaySelectorReturnsNull() {
+        Flowable.just(1)
+        .replay(new Function<Flowable<Integer>, Publisher<Object>>() {
+            @Override
+            public Publisher<Object> apply(Flowable<Integer> v) throws Exception {
+                return null;
+            }
+        }, Schedulers.trampoline())
+        .test()
+        .assertFailureAndMessage(NullPointerException.class, "The selector returned a null Publisher");
+    }
+
+    @Test
+    public void multicastSelectorCallableConnectableCrash() {
+        FlowableReplay.multicastSelector(new Callable<ConnectableFlowable<Object>>() {
+            @Override
+            public ConnectableFlowable<Object> call() throws Exception {
+                throw new TestException();
+            }
+        }, Functions.<Flowable<Object>>identity())
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void badRequest() {
+        TestHelper.assertBadRequestReported(
+            Flowable.never()
+            .replay()
+        );
+    }
+
+    @Test
+    public void noHeadRetentionCompleteSize() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1);
+
+        // the backpressure coordination would not accept items from source otherwise
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onComplete();
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test
+    public void noHeadRetentionErrorSize() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1);
+
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onError(new TestException());
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test
+    public void noHeadRetentionSize() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1);
+
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+        source.onNext(2);
+
+        assertNotNull(buf.get().value);
+
+        buf.trimHead();
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test
+    public void noHeadRetentionCompleteTime() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1, TimeUnit.MINUTES, Schedulers.computation());
+
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onComplete();
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test
+    public void noHeadRetentionErrorTime() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1, TimeUnit.MINUTES, Schedulers.computation());
+
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+        source.onNext(2);
+        source.onError(new TestException());
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test
+    public void noHeadRetentionTime() {
+        TestScheduler sch = new TestScheduler();
+
+        PublishProcessor<Integer> source = PublishProcessor.create();
+
+        FlowableReplay<Integer> co = (FlowableReplay<Integer>)source
+                .replay(1, TimeUnit.MILLISECONDS, sch);
+
+        co.test();
+
+        co.connect();
+
+        BoundedReplayBuffer<Integer> buf = (BoundedReplayBuffer<Integer>)(co.current.get().buffer);
+
+        source.onNext(1);
+
+        sch.advanceTimeBy(2, TimeUnit.MILLISECONDS);
+
+        source.onNext(2);
+
+        assertNotNull(buf.get().value);
+
+        buf.trimHead();
+
+        assertNull(buf.get().value);
+
+        Object o = buf.get();
+
+        buf.trimHead();
+
+        assertSame(o, buf.get());
+    }
+
+    @Test(expected = TestException.class)
+    public void createBufferFactoryCrash() {
+        FlowableReplay.create(Flowable.just(1), new Callable<ReplayBuffer<Integer>>() {
+            @Override
+            public ReplayBuffer<Integer> call() throws Exception {
+                throw new TestException();
+            }
+        })
+        .connect();
+    }
+
+    @Test
+    public void createBufferFactoryCrashOnSubscribe() {
+        FlowableReplay.create(Flowable.just(1), new Callable<ReplayBuffer<Integer>>() {
+            @Override
+            public ReplayBuffer<Integer> call() throws Exception {
+                throw new TestException();
+            }
+        })
+        .test()
+        .assertFailure(TestException.class);
+    }
+
+    @Test
+    public void currentDisposedWhenConnecting() {
+        FlowableReplay<Integer> fr = (FlowableReplay<Integer>)FlowableReplay.create(Flowable.<Integer>never(), 16);
+        fr.connect();
+
+        fr.current.get().dispose();
+        assertTrue(fr.current.get().isDisposed());
+
+        fr.connect();
+
+        assertFalse(fr.current.get().isDisposed());
+    }
+
+    @Test
+    public void noBoundedRetentionViaThreadLocal() throws Exception {
+        Flowable<byte[]> source = Flowable.range(1, 200)
+        .map(new Function<Integer, byte[]>() {
+            @Override
+            public byte[] apply(Integer v) throws Exception {
+                return new byte[1024 * 1024];
+            }
+        })
+        .replay(new Function<Flowable<byte[]>, Publisher<byte[]>>() {
+            @Override
+            public Publisher<byte[]> apply(final Flowable<byte[]> f) throws Exception {
+                return f.take(1)
+                .concatMap(new Function<byte[], Publisher<byte[]>>() {
+                    @Override
+                    public Publisher<byte[]> apply(byte[] v) throws Exception {
+                        return f;
+                    }
+                });
+            }
+        }, 1)
+        .takeLast(1)
+        ;
+
+        System.out.println("Bounded Replay Leak check: Wait before GC");
+        Thread.sleep(1000);
+
+        System.out.println("Bounded Replay Leak check: GC");
+        System.gc();
+
+        Thread.sleep(500);
+
+        final MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
+        MemoryUsage memHeap = memoryMXBean.getHeapMemoryUsage();
+        long initial = memHeap.getUsed();
+
+        System.out.printf("Bounded Replay Leak check: Starting: %.3f MB%n", initial / 1024.0 / 1024.0);
+
+        final AtomicLong after = new AtomicLong();
+
+        source.subscribe(new Consumer<byte[]>() {
+            @Override
+            public void accept(byte[] v) throws Exception {
+                System.out.println("Bounded Replay Leak check: Wait before GC 2");
+                Thread.sleep(1000);
+
+                System.out.println("Bounded Replay Leak check:  GC 2");
+                System.gc();
+
+                Thread.sleep(500);
+
+                after.set(memoryMXBean.getHeapMemoryUsage().getUsed());
+            }
+        });
+
+        System.out.printf("Bounded Replay Leak check: After: %.3f MB%n", after.get() / 1024.0 / 1024.0);
+
+        if (initial + 100 * 1024 * 1024 < after.get()) {
+            Assert.fail("Bounded Replay Leak check: Memory leak detected: " + (initial / 1024.0 / 1024.0)
+                    + " -> " + after.get() / 1024.0 / 1024.0);
+        }
+    }
 }

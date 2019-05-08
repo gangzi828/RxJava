@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -51,7 +51,7 @@ public final class MaybeConcatArrayDelayError<T> extends Flowable<T> {
 
         private static final long serialVersionUID = 3520831347801429610L;
 
-        final Subscriber<? super T> actual;
+        final Subscriber<? super T> downstream;
 
         final AtomicLong requested;
 
@@ -68,7 +68,7 @@ public final class MaybeConcatArrayDelayError<T> extends Flowable<T> {
         long produced;
 
         ConcatMaybeObserver(Subscriber<? super T> actual, MaybeSource<? extends T>[] sources) {
-            this.actual = actual;
+            this.downstream = actual;
             this.sources = sources;
             this.requested = new AtomicLong();
             this.disposables = new SequentialDisposable();
@@ -123,10 +123,11 @@ public final class MaybeConcatArrayDelayError<T> extends Flowable<T> {
             }
 
             AtomicReference<Object> c = current;
-            Subscriber<? super T> a = actual;
+            Subscriber<? super T> a = downstream;
+            Disposable cancelled = disposables;
 
             for (;;) {
-                if (disposables.isDisposed()) {
+                if (cancelled.isDisposed()) {
                     c.lazySet(null);
                     return;
                 }
@@ -151,7 +152,7 @@ public final class MaybeConcatArrayDelayError<T> extends Flowable<T> {
                         c.lazySet(null);
                     }
 
-                    if (goNextSource) {
+                    if (goNextSource && !cancelled.isDisposed()) {
                         int i = index;
                         if (i == sources.length) {
                             Throwable ex = errors.get();

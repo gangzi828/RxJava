@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -70,5 +70,18 @@ public class ObservableIntervalRangeTest {
         } catch (IllegalArgumentException ex) {
             assertEquals("Overflow! start + count is bigger than Long.MAX_VALUE", ex.getMessage());
         }
+    }
+
+    @Test
+    public void dispose() {
+        TestHelper.checkDisposed(Observable.intervalRange(1, 2, 1, 1, TimeUnit.MILLISECONDS));
+    }
+
+    @Test(timeout = 2000)
+    public void cancel() {
+        Observable.intervalRange(0, 20, 1, 1, TimeUnit.MILLISECONDS, Schedulers.trampoline())
+        .take(10)
+        .test()
+        .assertResult(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L);
     }
 }

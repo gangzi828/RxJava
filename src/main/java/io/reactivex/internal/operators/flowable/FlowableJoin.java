@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
 
+import io.reactivex.Flowable;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.exceptions.*;
 import io.reactivex.functions.*;
@@ -40,7 +41,7 @@ public final class FlowableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends A
     final BiFunction<? super TLeft, ? super TRight, ? extends R> resultSelector;
 
     public FlowableJoin(
-            Publisher<TLeft> source,
+            Flowable<TLeft> source,
             Publisher<? extends TRight> other,
             Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
             Function<? super TRight, ? extends Publisher<TRightEnd>> rightEnd,
@@ -55,8 +56,8 @@ public final class FlowableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends A
     @Override
     protected void subscribeActual(Subscriber<? super R> s) {
 
-        GroupJoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R> parent =
-                new GroupJoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>(s, leftEnd, rightEnd, resultSelector);
+        JoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R> parent =
+                new JoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>(s, leftEnd, rightEnd, resultSelector);
 
         s.onSubscribe(parent);
 
@@ -69,13 +70,12 @@ public final class FlowableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends A
         other.subscribe(right);
     }
 
-    static final class GroupJoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>
+    static final class JoinSubscription<TLeft, TRight, TLeftEnd, TRightEnd, R>
     extends AtomicInteger implements Subscription, JoinSupport {
-
 
         private static final long serialVersionUID = -6071216598687999801L;
 
-        final Subscriber<? super R> actual;
+        final Subscriber<? super R> downstream;
 
         final AtomicLong requested;
 
@@ -111,10 +111,10 @@ public final class FlowableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends A
 
         static final Integer RIGHT_CLOSE = 4;
 
-        GroupJoinSubscription(Subscriber<? super R> actual, Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
+        JoinSubscription(Subscriber<? super R> actual, Function<? super TLeft, ? extends Publisher<TLeftEnd>> leftEnd,
                 Function<? super TRight, ? extends Publisher<TRightEnd>> rightEnd,
                         BiFunction<? super TLeft, ? super TRight, ? extends R> resultSelector) {
-            this.actual = actual;
+            this.downstream = actual;
             this.requested = new AtomicLong();
             this.disposables = new CompositeDisposable();
             this.queue = new SpscLinkedArrayQueue<Object>(bufferSize());
@@ -174,7 +174,7 @@ public final class FlowableJoin<TLeft, TRight, TLeftEnd, TRightEnd, R> extends A
 
             int missed = 1;
             SpscLinkedArrayQueue<Object> q = queue;
-            Subscriber<? super R> a = actual;
+            Subscriber<? super R> a = downstream;
 
             for (;;) {
                 for (;;) {

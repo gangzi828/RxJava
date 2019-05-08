@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -15,12 +15,13 @@ package io.reactivex.internal.operators.flowable;
 
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
 import io.reactivex.internal.util.EmptyComponent;
 
 public final class FlowableDetach<T> extends AbstractFlowableWithUpstream<T, T> {
 
-    public FlowableDetach(Publisher<T> source) {
+    public FlowableDetach(Flowable<T> source) {
         super(source);
     }
 
@@ -29,56 +30,56 @@ public final class FlowableDetach<T> extends AbstractFlowableWithUpstream<T, T> 
         source.subscribe(new DetachSubscriber<T>(s));
     }
 
-    static final class DetachSubscriber<T> implements Subscriber<T>, Subscription {
+    static final class DetachSubscriber<T> implements FlowableSubscriber<T>, Subscription {
 
-        Subscriber<? super T> actual;
+        Subscriber<? super T> downstream;
 
-        Subscription s;
+        Subscription upstream;
 
-        DetachSubscriber(Subscriber<? super T> actual) {
-            this.actual = actual;
+        DetachSubscriber(Subscriber<? super T> downstream) {
+            this.downstream = downstream;
         }
 
         @Override
         public void request(long n) {
-            s.request(n);
+            upstream.request(n);
         }
 
         @Override
         public void cancel() {
-            Subscription s = this.s;
-            this.s = EmptyComponent.INSTANCE;
-            this.actual = EmptyComponent.asSubscriber();
+            Subscription s = this.upstream;
+            this.upstream = EmptyComponent.INSTANCE;
+            this.downstream = EmptyComponent.asSubscriber();
             s.cancel();
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
             }
         }
 
         @Override
         public void onNext(T t) {
-            actual.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
         public void onError(Throwable t) {
-            Subscriber<? super T> a = actual;
-            this.s = EmptyComponent.INSTANCE;
-            this.actual = EmptyComponent.asSubscriber();
+            Subscriber<? super T> a = downstream;
+            this.upstream = EmptyComponent.INSTANCE;
+            this.downstream = EmptyComponent.asSubscriber();
             a.onError(t);
         }
 
         @Override
         public void onComplete() {
-            Subscriber<? super T> a = actual;
-            this.s = EmptyComponent.INSTANCE;
-            this.actual = EmptyComponent.asSubscriber();
+            Subscriber<? super T> a = downstream;
+            this.upstream = EmptyComponent.INSTANCE;
+            this.downstream = EmptyComponent.asSubscriber();
             a.onComplete();
         }
     }

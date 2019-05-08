@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -30,7 +30,7 @@ public final class CompletableConcatIterable extends Completable {
     }
 
     @Override
-    public void subscribeActual(CompletableObserver s) {
+    public void subscribeActual(CompletableObserver observer) {
 
         Iterator<? extends CompletableSource> it;
 
@@ -38,12 +38,12 @@ public final class CompletableConcatIterable extends Completable {
             it = ObjectHelper.requireNonNull(sources.iterator(), "The iterator returned is null");
         } catch (Throwable e) {
             Exceptions.throwIfFatal(e);
-            EmptyDisposable.error(e, s);
+            EmptyDisposable.error(e, observer);
             return;
         }
 
-        ConcatInnerObserver inner = new ConcatInnerObserver(s, it);
-        s.onSubscribe(inner.sd);
+        ConcatInnerObserver inner = new ConcatInnerObserver(observer, it);
+        observer.onSubscribe(inner.sd);
         inner.next();
     }
 
@@ -51,25 +51,25 @@ public final class CompletableConcatIterable extends Completable {
 
         private static final long serialVersionUID = -7965400327305809232L;
 
-        final CompletableObserver actual;
+        final CompletableObserver downstream;
         final Iterator<? extends CompletableSource> sources;
 
         final SequentialDisposable sd;
 
         ConcatInnerObserver(CompletableObserver actual, Iterator<? extends CompletableSource> sources) {
-            this.actual = actual;
+            this.downstream = actual;
             this.sources = sources;
             this.sd = new SequentialDisposable();
         }
 
         @Override
         public void onSubscribe(Disposable d) {
-            sd.update(d);
+            sd.replace(d);
         }
 
         @Override
         public void onError(Throwable e) {
-            actual.onError(e);
+            downstream.onError(e);
         }
 
         @Override
@@ -97,27 +97,22 @@ public final class CompletableConcatIterable extends Completable {
                     b = a.hasNext();
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    actual.onError(ex);
+                    downstream.onError(ex);
                     return;
                 }
 
                 if (!b) {
-                    actual.onComplete();
+                    downstream.onComplete();
                     return;
                 }
 
                 CompletableSource c;
 
                 try {
-                    c = a.next();
+                    c = ObjectHelper.requireNonNull(a.next(), "The CompletableSource returned is null");
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    actual.onError(ex);
-                    return;
-                }
-
-                if (c == null) {
-                    actual.onError(new NullPointerException("The completable returned is null"));
+                    downstream.onError(ex);
                     return;
                 }
 

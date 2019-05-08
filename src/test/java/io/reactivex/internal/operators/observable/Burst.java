@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -27,10 +27,10 @@ import io.reactivex.disposables.Disposables;
  */
 public final class Burst<T> extends Observable<T> {
 
-    private final List<T> items;
-    private final Throwable error;
+    final List<T> items;
+    final Throwable error;
 
-    private Burst(Throwable error, List<T> items) {
+    Burst(Throwable error, List<T> items) {
         this.error = error;
         this.items = items;
     }
@@ -62,7 +62,7 @@ public final class Burst<T> extends Observable<T> {
         private final List<T> items;
         private Throwable error;
 
-        private Builder(List<T> items) {
+        Builder(List<T> items) {
             this.items = items;
         }
 

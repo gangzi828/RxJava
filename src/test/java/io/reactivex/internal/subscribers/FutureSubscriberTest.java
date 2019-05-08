@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.subscribers;
 
+import static io.reactivex.internal.util.ExceptionHelper.timeoutMessage;
 import static org.junit.Assert.*;
 
 import java.util.*;
@@ -87,7 +88,7 @@ public class FutureSubscriberTest {
                 assertEquals("One", ex.getCause().getMessage());
             }
 
-            TestHelper.assertError(errors, 0, TestException.class, "Two");
+            TestHelper.assertUndeliverable(errors, 0, TestException.class, "Two");
         } finally {
             RxJavaPlugins.reset();
         }
@@ -126,7 +127,7 @@ public class FutureSubscriberTest {
 
     @Test
     public void cancelRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final FutureSubscriber<Integer> fs = new FutureSubscriber<Integer>();
 
             Runnable r = new Runnable() {
@@ -136,7 +137,7 @@ public class FutureSubscriberTest {
                 }
             };
 
-            TestHelper.race(r, r, Schedulers.single());
+            TestHelper.race(r, r);
         }
     }
 
@@ -155,7 +156,7 @@ public class FutureSubscriberTest {
 
     @Test
     public void onErrorCancelRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final FutureSubscriber<Integer> fs = new FutureSubscriber<Integer>();
 
             final TestException ex = new TestException();
@@ -174,13 +175,13 @@ public class FutureSubscriberTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
     @Test
     public void onCompleteCancelRace() {
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < TestHelper.RACE_DEFAULT_LOOPS; i++) {
             final FutureSubscriber<Integer> fs = new FutureSubscriber<Integer>();
 
             if (i % 3 == 0) {
@@ -205,7 +206,7 @@ public class FutureSubscriberTest {
                 }
             };
 
-            TestHelper.race(r1, r2, Schedulers.single());
+            TestHelper.race(r1, r2);
         }
     }
 
@@ -267,5 +268,28 @@ public class FutureSubscriberTest {
         fs.onComplete();
 
         assertEquals(1, fs.get(5, TimeUnit.MILLISECONDS).intValue());
+    }
+
+    @Test
+    public void completeAsync() throws Exception {
+        Schedulers.single().scheduleDirect(new Runnable() {
+            @Override
+            public void run() {
+                fs.onNext(1);
+                fs.onComplete();
+            }
+        }, 500, TimeUnit.MILLISECONDS);
+
+        assertEquals(1, fs.get().intValue());
+    }
+
+    @Test
+    public void getTimedOut() throws Exception {
+        try {
+            fs.get(1, TimeUnit.NANOSECONDS);
+            fail("Should have thrown");
+        } catch (TimeoutException expected) {
+            assertEquals(timeoutMessage(1, TimeUnit.NANOSECONDS), expected.getMessage());
+        }
     }
 }

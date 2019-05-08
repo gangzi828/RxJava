@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,16 +13,17 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import io.reactivex.plugins.RxJavaPlugins;
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.Predicate;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
+import io.reactivex.plugins.RxJavaPlugins;
 
 public final class FlowableTakeWhile<T> extends AbstractFlowableWithUpstream<T, T> {
     final Predicate<? super T> predicate;
-    public FlowableTakeWhile(Publisher<T> source, Predicate<? super T> predicate) {
+    public FlowableTakeWhile(Flowable<T> source, Predicate<? super T> predicate) {
         super(source);
         this.predicate = predicate;
     }
@@ -32,24 +33,24 @@ public final class FlowableTakeWhile<T> extends AbstractFlowableWithUpstream<T, 
         source.subscribe(new TakeWhileSubscriber<T>(s, predicate));
     }
 
-    static final class TakeWhileSubscriber<T> implements Subscriber<T>, Subscription {
-        final Subscriber<? super T> actual;
+    static final class TakeWhileSubscriber<T> implements FlowableSubscriber<T>, Subscription {
+        final Subscriber<? super T> downstream;
         final Predicate<? super T> predicate;
 
-        Subscription s;
+        Subscription upstream;
 
         boolean done;
 
         TakeWhileSubscriber(Subscriber<? super T> actual, Predicate<? super T> predicate) {
-            this.actual = actual;
+            this.downstream = actual;
             this.predicate = predicate;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
-                actual.onSubscribe(this);
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
+                downstream.onSubscribe(this);
             }
         }
 
@@ -63,19 +64,19 @@ public final class FlowableTakeWhile<T> extends AbstractFlowableWithUpstream<T, 
                 b = predicate.test(t);
             } catch (Throwable e) {
                 Exceptions.throwIfFatal(e);
-                s.cancel();
+                upstream.cancel();
                 onError(e);
                 return;
             }
 
             if (!b) {
                 done = true;
-                s.cancel();
-                actual.onComplete();
+                upstream.cancel();
+                downstream.onComplete();
                 return;
             }
 
-            actual.onNext(t);
+            downstream.onNext(t);
         }
 
         @Override
@@ -85,7 +86,7 @@ public final class FlowableTakeWhile<T> extends AbstractFlowableWithUpstream<T, 
                 return;
             }
             done = true;
-            actual.onError(t);
+            downstream.onError(t);
         }
 
         @Override
@@ -94,17 +95,17 @@ public final class FlowableTakeWhile<T> extends AbstractFlowableWithUpstream<T, 
                 return;
             }
             done = true;
-            actual.onComplete();
+            downstream.onComplete();
         }
 
         @Override
         public void request(long n) {
-            s.request(n);
+            upstream.request(n);
         }
 
         @Override
         public void cancel() {
-            s.cancel();
+            upstream.cancel();
         }
     }
 }

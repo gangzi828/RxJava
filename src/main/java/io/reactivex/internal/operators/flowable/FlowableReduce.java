@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Netflix, Inc.
+ * Copyright (c) 2016-present, RxJava Contributors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
  * compliance with the License. You may obtain a copy of the License at
@@ -13,10 +13,9 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.NoSuchElementException;
-
 import org.reactivestreams.*;
 
+import io.reactivex.*;
 import io.reactivex.exceptions.Exceptions;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.internal.functions.ObjectHelper;
@@ -33,7 +32,7 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
 
     final BiFunction<T, T, T> reducer;
 
-    public FlowableReduce(Publisher<T> source, BiFunction<T, T, T> reducer) {
+    public FlowableReduce(Flowable<T> source, BiFunction<T, T, T> reducer) {
         super(source);
         this.reducer = reducer;
     }
@@ -43,13 +42,13 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
         source.subscribe(new ReduceSubscriber<T>(s, reducer));
     }
 
-    static final class ReduceSubscriber<T> extends DeferredScalarSubscription<T> implements Subscriber<T> {
+    static final class ReduceSubscriber<T> extends DeferredScalarSubscription<T> implements FlowableSubscriber<T> {
 
         private static final long serialVersionUID = -4663883003264602070L;
 
         final BiFunction<T, T, T> reducer;
 
-        Subscription s;
+        Subscription upstream;
 
         ReduceSubscriber(Subscriber<? super T> actual, BiFunction<T, T, T> reducer) {
             super(actual);
@@ -58,10 +57,10 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
 
         @Override
         public void onSubscribe(Subscription s) {
-            if (SubscriptionHelper.validate(this.s, s)) {
-                this.s = s;
+            if (SubscriptionHelper.validate(this.upstream, s)) {
+                this.upstream = s;
 
-                actual.onSubscribe(this);
+                downstream.onSubscribe(this);
 
                 s.request(Long.MAX_VALUE);
             }
@@ -69,7 +68,7 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
 
         @Override
         public void onNext(T t) {
-            if (s == SubscriptionHelper.CANCELLED) {
+            if (upstream == SubscriptionHelper.CANCELLED) {
                 return;
             }
 
@@ -81,7 +80,7 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
                     value = ObjectHelper.requireNonNull(reducer.apply(v, t), "The reducer returned a null value");
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    s.cancel();
+                    upstream.cancel();
                     onError(ex);
                 }
             }
@@ -89,34 +88,34 @@ public final class FlowableReduce<T> extends AbstractFlowableWithUpstream<T, T> 
 
         @Override
         public void onError(Throwable t) {
-            if (s == SubscriptionHelper.CANCELLED) {
+            if (upstream == SubscriptionHelper.CANCELLED) {
                 RxJavaPlugins.onError(t);
                 return;
             }
-            s = SubscriptionHelper.CANCELLED;
-            actual.onError(t);
+            upstream = SubscriptionHelper.CANCELLED;
+            downstream.onError(t);
         }
 
         @Override
         public void onComplete() {
-            if (s == SubscriptionHelper.CANCELLED) {
+            if (upstream == SubscriptionHelper.CANCELLED) {
                 return;
             }
-            s = SubscriptionHelper.CANCELLED;
+            upstream = SubscriptionHelper.CANCELLED;
 
             T v = value;
             if (v != null) {
                 complete(v);
             } else {
-                actual.onError(new NoSuchElementException());
+                downstream.onComplete();
             }
         }
 
         @Override
         public void cancel() {
             super.cancel();
-            s.cancel();
-            s = SubscriptionHelper.CANCELLED;
+            upstream.cancel();
+            upstream = SubscriptionHelper.CANCELLED;
         }
 
     }
